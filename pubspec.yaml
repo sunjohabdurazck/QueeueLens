@@ -1,56 +1,133 @@
 name: queeue_lens
-description: QueeueLens - IUT Student Attendance System with QR scanning
+description: QueeueLens - IUT Student Queue tracking with QR scanning
 publish_to: 'none'
+
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: ">=3.11.0-0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  
-  # State Management
-  flutter_bloc: ^8.1.3
-  equatable: ^2.0.5
-  
-  # Dependency Injection
-  get_it: ^7.6.4
-  
-  # Navigation
-  go_router: ^12.1.3
-  
-  # Local Storage
-  shared_preferences: ^2.2.2
-  
-  # Firebase (for future real implementation)
+
+  # Web package for JS interop
+  web: ^1.1.0
+
+  # WebView - include all platforms
+  webview_flutter: ^4.7.0
+  webview_flutter_android: ^4.0.0
+  webview_flutter_wkwebview: ^3.13.0
+  webview_flutter_web: ^0.2.3+2
+
+  qr_flutter: ^4.1.0
+
+  # Networking
+  http: ^1.1.0
+
+  # Maps + Location
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
+  geolocator: ^14.0.2
+  permission_handler: ^12.0.1
+  image_picker: ^1.0.4
+
+  # Firebase
   firebase_core: ^4.3.0
   firebase_auth: ^6.1.3
   cloud_firestore: ^6.1.1
+  firebase_storage: ^13.0.5
+  firebase_messaging: 16.1.1
+
+  # State Management
+  flutter_bloc: ^9.1.1
+  flutter_riverpod: ^2.6.1
+  equatable: ^2.0.7
+
+  # Dependency Injection
+  get_it: ^9.2.0
+
+  # Routing
+  go_router: ^17.0.1
+
+  # Local Storage
+  shared_preferences: ^2.3.4
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.3
+
+  # QR + Camera
+  mobile_scanner: ^7.1.4
+  camera: ^0.11.3
   
-  # QR Code Scanning
-  mobile_scanner: ^3.5.5
-  
-  # Camera (additional camera support)
-  camera: ^0.10.5
-  
+  js: ^0.7.1 
+  # Device Info + Utilities
+  device_info_plus: ^12.3.0
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  collection: ^1.18.0
+
   # Functional Programming
   dartz: ^0.10.1
-  
+
   # UI
-  cupertino_icons: ^1.0.6
-  google_fonts: ^6.1.0
+  cupertino_icons: ^1.0.8
+  google_fonts: ^8.0.0
+
+  # Location & Sensors
+  location: ^8.0.1
+  flutter_compass: ^0.8.0
+  vector_math: ^2.1.4
+
+  # Notifications & Background Geofencing
+  flutter_local_notifications: ^17.0.0
+  flutter_background_service: ^5.0.5
+  flutter_background_service_android: ^6.0.0
+
+  # Web ML Options - CHOOSE ONE:
+  # Option 1: tflite_web (for TFLite models on web)
+  tflite_web: ^0.3.3
+  # Option 2: ML Helper (cross-platform with web support)
+  # flutter_ml_helper: ^0.0.3
   
-  # Utilities
-  intl: ^0.18.1
+  # Option 3: OR just remove ML features on web
+  # (no package needed, use conditional imports)
+
+  # MJPEG Streaming
+  mjpeg_view: ^1.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^6.0.0
   mockito: ^5.4.4
-  build_runner: ^2.4.7
+  build_runner: ^2.4.8
+  hive_generator: ^2.0.1
+
+# Platform-specific configuration
+platforms:
+  android:
+  ios:
+  web:
+  windows:
+  macos:
+  linux:
+
+# Dependency overrides to ensure compatibility
+dependency_overrides:
+  # Ensure camera package versions are compatible
+  camera_android_camerax: 0.6.30
+  camera_avfoundation: 0.9.23+2
+  
+  # Override flutter_map to avoid web issues
+  flutter_map: 6.1.0
+
+  
 
 flutter:
   uses-material-design: true
-  
+  assets:
+    - assets/images/
+    # Machine Learning Models
+    - assets/models/android/ssd_mobilenet_v2.tflite
+    - assets/models/web/ssd_mobilenet_v2.tflite

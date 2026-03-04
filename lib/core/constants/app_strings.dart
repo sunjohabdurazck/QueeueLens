@@ -1,0 +1,44 @@
+class AppStrings {
+  static const appName = 'QueueLens';
+  static const services = 'Services';
+  static const serviceDetails = 'Service Details';
+  static const open = 'OPEN';
+  static const closed = 'CLOSED';
+  static const searchServices = 'Search services...';
+  static const showOpenOnly = 'Show open only';
+  static const noServices = 'No services available';
+  static const errorLoading = 'Error loading services';
+  static const retry = 'Retry';
+  static const activeInQueue = 'Active in Queue';
+  static const pendingInQueue = 'Pending';
+  static const estimatedWait = 'Estimated Wait';
+  static const minutes = 'min';
+  static const lastUpdated = 'Last updated';
+  static const description = 'Description';
+  static const avgServiceTime = 'Avg. Service Time';
+  static const perPerson = 'per person';
+  static const String joinedSuccessfully = 'Joined queue successfully!';
+  static const String alreadyInThisQueue = 'You are already in this queue';
+  static const String alreadyInOtherQueue =
+      'You are already in another queue. Please check out first.';
+  static const String myQueue = 'My Queue';
+  static const String noActiveQueue = 'No Active Queue';
+  static const String youAreNotInQueue = 'You are not currently in any queue';
+  static const String leaveQueue = 'Leave Queue';
+  static const String confirmLeave = 'Confirm Leave';
+  static const String areYouSure = 'Are you sure you want to leave this queue?';
+  static const String cancel = 'Cancel';
+  static const String leave = 'Leave';
+  static const String leftSuccessfully = 'Left queue successfully!';
+  static const String scanQR = 'Scan QR Code';
+  static const String invalidQR = 'Invalid QR code';
+  static const String qrExpired = 'QR code has expired';
+  static const String serviceClosed = 'Service is currently closed';
+  static const String scanToJoin = 'Scan QR code to join queue';
+  static const String checkInRequired = 'Check-in Required';
+  static const String checkInNow = 'Check-in now to join the queue';
+  static const String timeRemaining = 'Time Remaining';
+  static const String checkIn = 'Check In';
+  static const String checkedIn = 'Checked In';
+  static const String yourPosition = 'Your Position';
+}

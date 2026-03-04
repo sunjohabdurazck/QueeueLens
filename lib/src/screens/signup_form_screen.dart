@@ -9,7 +9,7 @@ import '../core/widgets/snackbars.dart';
 import '../widgets/password_strength_indicator.dart';
 import 'email_verification_screen.dart';
 import '../core/utils/exceptions.dart';
-import '../core/theme/app_colors.dart'; // Import AppColors
+import '../core/theme/app_colors.dart';
 
 // VerificationReminderDialog Widget (same as before)
 class VerificationReminderDialog extends StatelessWidget {
@@ -30,18 +30,22 @@ class VerificationReminderDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('A verification email will be sent to:',
-              style: Theme.of(context).textTheme.bodyMedium),
+          Text(
+            'A verification email will be sent to:',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
           const SizedBox(height: 8),
-          Text(email,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyLarge
-                  ?.copyWith(fontWeight: FontWeight.bold)),
+          Text(
+            email,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 16),
           Text(
-              'Please check your inbox and verify your email before signing in.',
-              style: TextStyle(color: AppColors.lightOnSurfaceVariant)),
+            'Please check your inbox and verify your email before signing in.',
+            style: TextStyle(color: AppColors.lightOnSurfaceVariant),
+          ),
         ],
       ),
       actions: [
@@ -74,7 +78,7 @@ class StudentPreviewCard extends StatelessWidget {
     student.forEach((key, value) {
       print('  $key: $value');
     });
-    
+
     // Extract last 2 digits of batch from studentID
     String batch = '';
     final studentID = student['studentID'] ?? '';
@@ -213,36 +217,9 @@ class StudentPreviewCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          studentIdDisplay.isNotEmpty ? studentIdDisplay : student['studentID'] ?? 'Not available',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: AppColors.lightOnBackground,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // VERTICAL SEPARATOR
-                  Container(
-                    height: 30,
-                    width: 1,
-                    color: AppColors.lightBorder,
-                  ),
-                  // BATCH COLUMN ONLY - NO COUNTRY COLUMN
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text(
-                          'Batch',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.lightOnSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          batch.isNotEmpty ? batch : '--',
+                          studentIdDisplay.isNotEmpty
+                              ? studentIdDisplay
+                              : student['studentID'] ?? 'Not available',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -261,64 +238,43 @@ class StudentPreviewCard extends StatelessWidget {
     );
   }
 
-  // Helper function to simplify country names
   String _simplifyCountryName(String country) {
-    // Simple string replacement without regex
-    return country
-        .replaceAll('Islamic Republic of ', '')
-        .replaceAll('Republic of ', '')
-        .replaceAll('Kingdom of ', '')
-        .replaceAll('State of ', '')
-        .replaceAll('People\'s Republic of ', '')
-        .replaceAll('People\'s Democratic Republic of ', '')
-        .replaceAll('Federal Republic of ', '')
-        .replaceAll('Hashemite Kingdom of ', '')
-        .replaceAll('Sultanate of ', '')
-        .replaceAll('Arab Republic of ', '')
-        .replaceAll('Great Socialist People\'s ', '')
-        .replaceAll('Union of The ', '')
-        .trim();
+    if (country.isEmpty) return '';
+    final lower = country.toLowerCase();
+    if (lower.contains('bangladesh')) return 'Bangladesh';
+    if (lower.contains('india')) return 'India';
+    if (lower.contains('pakistan')) return 'Pakistan';
+    if (lower.contains('nepal')) return 'Nepal';
+    if (lower.contains('afghanistan')) return 'Afghanistan';
+    if (lower.contains('bhutan')) return 'Bhutan';
+    if (lower.contains('maldives')) return 'Maldives';
+    if (lower.contains('sri lanka')) return 'Sri Lanka';
+    return country;
   }
 
-  // Helper function to get country emoji
   String _getCountryEmoji(String country) {
     final countryEmojiMap = {
       'afghanistan': '🇦🇫',
-      'albania': '🇦🇱',
-      'algeria': '🇩🇿',
-      'azerbaijan': '🇦🇿',
       'bahrain': '🇧🇭',
       'bangladesh': '🇧🇩',
-      'benin': '🇧🇯',
-      'brunei': '🇧🇳',
-      'burkina faso': '🇧🇫',
-      'cameroon': '🇨🇲',
-      'chad': '🇹🇩',
-      'comoros': '🇰🇲',
-      'côte d\'ivoire': '🇨🇮',
-      'djibouti': '🇩🇯',
+      'bhutan': '🇧🇹',
       'egypt': '🇪🇬',
-      'gabon': '🇬🇦',
+      'ethiopia': '🇪🇹',
       'gambia': '🇬🇲',
-      'guinea': '🇬🇳',
-      'guinea-bissau': '🇬🇼',
-      'guyana': '🇬🇾',
+      'ghana': '🇬🇭',
+      'india': '🇮🇳',
       'indonesia': '🇮🇩',
       'iran': '🇮🇷',
       'iraq': '🇮🇶',
       'jordan': '🇯🇴',
-      'kazakhstan': '🇰🇿',
+      'kenya': '🇰🇪',
       'kuwait': '🇰🇼',
-      'kyrgyzstan': '🇰🇬',
       'lebanon': '🇱🇧',
       'libya': '🇱🇾',
       'malaysia': '🇲🇾',
       'maldives': '🇲🇻',
-      'mali': '🇲🇱',
-      'mauritania': '🇲🇷',
       'morocco': '🇲🇦',
-      'mozambique': '🇲🇿',
-      'niger': '🇳🇪',
+      'nepal': '🇳🇵',
       'nigeria': '🇳🇬',
       'oman': '🇴🇲',
       'pakistan': '🇵🇰',
@@ -326,13 +282,12 @@ class StudentPreviewCard extends StatelessWidget {
       'qatar': '🇶🇦',
       'saudi arabia': '🇸🇦',
       'senegal': '🇸🇳',
-      'sierra leone': '🇸🇱',
       'somalia': '🇸🇴',
+      'south africa': '🇿🇦',
+      'sri lanka': '🇱🇰',
       'sudan': '🇸🇩',
-      'suriname': '🇸🇷',
       'syria': '🇸🇾',
-      'tajikistan': '🇹🇯',
-      'togo': '🇹🇬',
+      'tanzania': '🇹🇿',
       'tunisia': '🇹🇳',
       'turkey': '🇹🇷',
       'turkmenistan': '🇹🇲',
@@ -343,22 +298,23 @@ class StudentPreviewCard extends StatelessWidget {
     };
 
     final normalizedCountry = country.toLowerCase();
-    
+
     if (countryEmojiMap.containsKey(normalizedCountry)) {
       return countryEmojiMap[normalizedCountry]!;
     }
-    
+
     for (final entry in countryEmojiMap.entries) {
-      if (normalizedCountry.contains(entry.key) || entry.key.contains(normalizedCountry)) {
+      if (normalizedCountry.contains(entry.key) ||
+          entry.key.contains(normalizedCountry)) {
         return entry.value;
       }
     }
-    
+
     return '👨‍🎓';
   }
 }
 
-// Main SignupFormScreen (unchanged from your Version B)
+// Main SignupFormScreen - FIXED VERSION
 class SignupFormScreen extends StatefulWidget {
   final Map<String, String> scannedStudent;
 
@@ -375,6 +331,8 @@ class _SignupFormScreenState extends State<SignupFormScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _obscurePassword = true;
   String? _emailError;
+  bool _isLoading = false; // ✅ ADDED
+  late final SignUpUseCase _signUpUseCase; // ✅ ADDED
 
   @override
   void initState() {
@@ -383,6 +341,7 @@ class _SignupFormScreenState extends State<SignupFormScreen> {
       text: widget.scannedStudent['name'],
     );
     _passwordController.addListener(() => setState(() {}));
+    _signUpUseCase = di.sl<SignUpUseCase>(); // ✅ ADDED
   }
 
   void _validateEmail() {
@@ -394,24 +353,82 @@ class _SignupFormScreenState extends State<SignupFormScreen> {
     }
   }
 
-  void _showVerificationDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => VerificationReminderDialog(
-        email: _emailController.text,
-        onClose: () {
-          Navigator.pop(context);
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) =>
-                  EmailVerificationScreen(email: _emailController.text),
+  // ✅ ADDED - ACTUAL SIGNUP FUNCTION
+  Future<void> _performSignup() async {
+    // Validate inputs
+    if (_emailError != null) {
+      showErrorSnackbar(context, _emailError!);
+      return;
+    }
+
+    if (_emailController.text.isEmpty) {
+      setState(() => _emailError = 'Email is required');
+      return;
+    }
+
+    if (_passwordController.text.isEmpty) {
+      showErrorSnackbar(context, 'Password is required');
+      return;
+    }
+
+    if (_passwordController.text.length < 8) {
+      showErrorSnackbar(context, 'Password must be at least 8 characters');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final student = Student(
+        uid: '', // Will be filled by Firebase
+        name: _nameController.text.trim(),
+        studentId: widget.scannedStudent['studentID']!,
+        email: _emailController.text.trim(),
+        country: widget.scannedStudent['country'] ?? '',
+        department: widget.scannedStudent['department'] ?? '',
+      );
+
+      await _signUpUseCase.call(
+        SignUpParams(student: student, password: _passwordController.text),
+      );
+
+      if (!mounted) return;
+
+      // Show success dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Account Created'),
+          content: Text(
+            'A verification email has been sent to:\n\n'
+            '${_emailController.text}\n\n'
+            'Please verify your email before signing in.',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context); // Close dialog
+                // Navigate back to login
+                int count = 0;
+                Navigator.popUntil(context, (route) {
+                  return count++ == 3; // Go back 3 screens to login
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.successGreen,
+              ),
+              child: const Text('Go to Login'),
             ),
-          );
-        },
-      ),
-    );
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showErrorSnackbar(context, 'Signup failed: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -443,7 +460,10 @@ class _SignupFormScreenState extends State<SignupFormScreen> {
               const SizedBox(height: 8),
               const Text(
                 'Fill in your details to create your account',
-                style: TextStyle(fontSize: 16, color: AppColors.lightOnSurfaceVariant),
+                style: TextStyle(
+                  fontSize: 16,
+                  color: AppColors.lightOnSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 32),
               StudentPreviewCard(student: widget.scannedStudent),
@@ -513,13 +533,9 @@ class _SignupFormScreenState extends State<SignupFormScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () {
-                          if (_emailError == null && _emailController.text.isNotEmpty) {
-                            _showVerificationDialog();
-                          } else if (_emailController.text.isEmpty) {
-                            setState(() => _emailError = 'Email is required');
-                          }
-                        },
+                        onPressed: _isLoading
+                            ? null
+                            : _performSignup, // ✅ FIXED
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.successGreen,
                           foregroundColor: Colors.white,
@@ -529,13 +545,23 @@ class _SignupFormScreenState extends State<SignupFormScreen> {
                           ),
                           elevation: 0,
                         ),
-                        child: const Text(
-                          'Create Account',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
-                          ),
-                        ),
+                        child:
+                            _isLoading // ✅ ADDED LOADING STATE
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'Create Account',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                ),
+                              ),
                       ),
                     ),
                   ],

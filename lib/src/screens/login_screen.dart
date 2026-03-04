@@ -8,6 +8,7 @@ import '../core/widgets/primary_button.dart';
 import '../core/widgets/custom_textfield.dart';
 import '../core/widgets/snackbars.dart';
 import 'home_screen.dart';
+import 'signup_web_screen.dart';
 import 'signup_scan_qr_screen.dart';
 import 'forgot_password_screen.dart';
 import '../core/theme/app_colors.dart';
@@ -79,23 +80,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       gradient: AppColors.primaryGradient,
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: const Icon(Icons.shield, size: 40, color: Colors.white),
+                    child: const Icon(
+                      Icons.shield,
+                      size: 40,
+                      color: Colors.white,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   Text(
                     'Welcome to IUT',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Sign in to your account',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 40),
                   Form(
@@ -106,8 +109,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 16),
                         PasswordTextField(
                           controller: _passwordController,
-                          validator: (v) =>
-                              v == null || v.isEmpty ? 'Password required' : null,
+                          validator: (v) => v == null || v.isEmpty
+                              ? 'Password required'
+                              : null,
                         ),
                         const SizedBox(height: 24),
                         PrimaryButton(
@@ -143,9 +147,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextButton(
                         onPressed: () {
                           if (kIsWeb) {
-                            showErrorSnackbar(
+                            Navigator.push(
                               context,
-                              'Sign up with QR is only available on the mobile app.',
+                              MaterialPageRoute(
+                                // builder: (_) => const SignupWebScreen()),
+                                builder: (_) => const SignupScanQrScreen(),
+                              ),
                             );
                             return;
                           }

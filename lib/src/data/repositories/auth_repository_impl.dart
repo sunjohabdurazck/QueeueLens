@@ -4,6 +4,8 @@ import '../datasources/firebase_auth_datasource.dart';
 import '../datasources/firestore_student_datasource.dart';
 import '../models/student_model.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
   final FirebaseAuthDataSource authDataSource;
@@ -41,7 +43,17 @@ class AuthRepositoryImpl implements AuthRepository {
 
       final updated = await firestoreDataSource.getStudent(user.uid);
       return updated!.toEntity();
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint("LOGIN RAW ERROR: $e");
+      debugPrint("STACK: $st");
+
+      if (e is FirebaseAuthException) {
+        debugPrint("AUTH CODE: ${e.code}  MESSAGE: ${e.message}");
+      }
+      if (e is FirebaseException) {
+        debugPrint("FIREBASE CODE: ${e.code}  MESSAGE: ${e.message}");
+      }
+
       throw _mapFirebaseException(e);
     }
   }
@@ -56,13 +68,6 @@ class AuthRepositoryImpl implements AuthRepository {
       if (!_isValidStudentId(student.studentId)) {
         throw AuthException('Student ID must be exactly 9 digits');
       }
-
-      final exists =
-          await firestoreDataSource.studentIdExists(student.studentId);
-      if (exists) {
-        throw AuthException('Student ID already registered');
-      }
-
       final user = await authDataSource.createUserWithEmailAndPassword(
         email: student.email,
         password: password,
@@ -76,13 +81,31 @@ class AuthRepositoryImpl implements AuthRepository {
           lastLoginAt: DateTime.now(),
         ),
       );
+      debugPrint("DOC ID (uid): ${studentModel.uid}");
+      debugPrint("studentID value: '${studentModel.studentId}'");
+      debugPrint(
+          "studentID runtimeType: ${studentModel.studentId.runtimeType}");
+      debugPrint("JSON: ${studentModel.toJson()}");
 
       await firestoreDataSource.createStudent(studentModel);
       await authDataSource.sendEmailVerification();
 
       return studentModel.toEntity();
-    } catch (e) {
-      throw _mapFirebaseException(e);
+    } catch (e, st) {
+      debugPrint("SIGNUP RAW ERROR: $e");
+      debugPrint("STACK: $st");
+
+      if (e is FirebaseAuthException) {
+        debugPrint("AUTH CODE: ${e.code}  MESSAGE: ${e.message}");
+        throw AuthException(e.message ?? 'Auth error', code: e.code);
+      }
+
+      if (e is FirebaseException) {
+        debugPrint("FIREBASE CODE: ${e.code}  MESSAGE: ${e.message}");
+        throw AuthException(e.message ?? 'Firebase error', code: e.code);
+      }
+
+      throw AuthException('Unexpected error: $e');
     }
   }
 
@@ -125,6 +148,10 @@ class AuthRepositoryImpl implements AuthRepository {
     try {
       await authDataSource.sendPasswordResetEmail(email);
     } catch (e) {
+      debugPrint("SIGNUP RAW ERROR: $e");
+      if (e is FirebaseException) {
+        debugPrint("FIREBASE CODE: ${e.code}  MESSAGE: ${e.message}");
+      }
       throw _mapFirebaseException(e);
     }
   }
@@ -210,42 +237,24 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   // ==================== FIXED MAPPER ====================
+
   AuthException _mapFirebaseException(Object e) {
     if (e is AuthException) return e;
 
+    // Firebase Auth errors
     if (e is FirebaseAuthException) {
-      switch (e.code) {
-        case 'wrong-password':
-        case 'invalid-credential':
-          return InvalidCredentialsException();
+      return AuthException(e.message ?? 'Auth error', code: e.code);
+    }
 
-        case 'user-not-found':
-          return UserNotFoundException();
-
-        case 'invalid-email':
-          return InvalidEmailException();
-
-        case 'email-already-in-use':
-          return EmailAlreadyInUseException();
-
-        case 'weak-password':
-          return WeakPasswordException();
-
-        case 'user-disabled':
-          return UserDisabledException();
-
-        case 'too-many-requests':
-          return TooManyRequestsException();
-
-        case 'network-request-failed':
-          return NetworkException();
-
-        default:
-          return AuthException(
-            e.message ?? 'Authentication failed',
-            code: e.code,
-          );
+    // ✅ Firestore / Firebase core errors
+    if (e is FirebaseException) {
+      if (e.code == 'unavailable') {
+        return AuthException(
+          'Firestore is offline. Please check your internet / VPN / adblock and try again.',
+          code: e.code,
+        );
       }
+      return AuthException(e.message ?? 'Firebase error', code: e.code);
     }
 
     return AuthException('An unexpected error occurred');

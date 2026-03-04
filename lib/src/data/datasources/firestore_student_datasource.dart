@@ -63,7 +63,7 @@ class FirestoreStudentDataSource {
   // -------------------------
   Future<bool> studentIdExists(String studentId) async {
     final query =
-        await _students.where('studentId', isEqualTo: studentId).limit(1).get();
+        await _students.where('studentID', isEqualTo: studentId).limit(1).get();
 
     return query.docs.isNotEmpty;
   }

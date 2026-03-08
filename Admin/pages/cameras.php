@@ -1,478 +1,240 @@
 <?php
-require_once '../config/config.php';
+ini_set('display_errors', 0);
+error_reporting(0);
+
+require_once __DIR__ . '/../config/config.php';
 requireRole(ROLE_STAFF);
+require_once __DIR__ . '/../config/firestore_rest.php';
+require_once __DIR__ . '/../services/AuditService.php';
 
-$pageTitle = 'Camera Management';
-include '../includes/header.php';
+$pageTitle = 'Cameras';
+include __DIR__ . '/../includes/header.php';
 
-// Get cameras and services
+function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
+
+$flash = null;
+$csrf  = generateCSRFToken();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCSRFToken($_POST['csrf_token'] ?? '')) {
+    $action = $_POST['action'] ?? '';
+    $camId  = trim($_POST['cameraId'] ?? '');
+
+    try {
+        switch($action) {
+            case 'create_camera':
+                if (isAdmin()) {
+                    $doc = [
+                        'name'        => trim($_POST['name'] ?? ''),
+                        'location'    => trim($_POST['location'] ?? ''),
+                        'streamUrl'   => trim($_POST['streamUrl'] ?? ''),
+                        'serviceId'   => trim($_POST['serviceId'] ?? ''),
+                        'isActive'    => true,
+                        'lastActive'  => fs_timestamp_now(),
+                        'createdAt'   => fs_timestamp_now(),
+                        'createdBy'   => $_SESSION['user_id'] ?? 'admin',
+                    ];
+                    firestore_createDocument('surveillance_cameras', $doc);
+                    AuditService::log('CAMERA_CREATE', 'surveillance_cameras', [], $doc);
+                    $flash = ['success'=>true,'message'=>'Camera added'];
+                }
+                break;
+
+            case 'toggle_camera':
+                $newActive = ($_POST['new_state'] ?? '1') === '1';
+                if ($camId) {
+                    firestore_updateDocument("surveillance_cameras/$camId", ['isActive' => $newActive]);
+                    AuditService::log($newActive?'CAMERA_ACTIVATE':'CAMERA_DEACTIVATE', "surveillance_cameras/$camId", [], ['isActive'=>$newActive]);
+                    $flash = ['success'=>true,'message'=>'Camera '.($newActive?'activated':'deactivated')];
+                }
+                break;
+
+            case 'delete_camera':
+                if (isAdmin() && $camId) {
+                    AuditService::log('CAMERA_DELETE', "surveillance_cameras/$camId", [], []);
+                    firestore_deleteDocument("surveillance_cameras/$camId");
+                    $flash = ['success'=>true,'message'=>'Camera deleted'];
+                }
+                break;
+        }
+    } catch(Exception $e) {
+        $flash = ['success'=>false,'message'=>'Error: '.$e->getMessage()];
+    }
+}
+
+$cameras = []; $services = [];
+
 try {
-    require_once '../config/firebase.php';
-    $firebase = FirebaseAdmin::getInstance();
-    $db = $firebase->getFirestore();
-    
-    $camerasRef = $db->collection('surveillance_cameras');
-    $cameras = $camerasRef->documents();
-    
-    $servicesRef = $db->collection('services');
-    $services = $servicesRef->documents();
-} catch (Exception $e) {
-    error_log("Camera page error: " . $e->getMessage());
+    $results = firestore_runQuery([
+        "from"  => [["collectionId" => "surveillance_cameras"]],
+        "limit" => 100
+    ]);
+    foreach ($results as $row) {
+        if (empty($row['document'])) continue;
+        $doc = $row['document'];
+        $d = firestore_unpack_fields($doc['fields'] ?? []);
+        $d['_id'] = basename($doc['name']);
+        $cameras[] = $d;
+    }
+
+    $sResults = firestore_runQuery([
+        "from"  => [["collectionId" => "services"]],
+        "limit" => 50
+    ]);
+    foreach ($sResults as $row) {
+        if (empty($row['document'])) continue;
+        $doc = $row['document'];
+        $d = firestore_unpack_fields($doc['fields'] ?? []);
+        $d['_id'] = basename($doc['name']);
+        $services[] = $d;
+    }
+    $sMap = [];
+    foreach ($services as $s) $sMap[$s['_id']] = $s['name'] ?? $s['_id'];
+
+} catch(Exception $e) { error_log("Cameras: ".$e->getMessage()); $sMap = []; }
+
+$online  = 0;
+$offline = 0;
+foreach ($cameras as $c) {
+    $lastActive = $c['lastActive'] ?? null;
+    $isOnline = ($c['isActive']??false) && $lastActive && (time()-strtotime($lastActive)) < 120;
+    if ($isOnline) $online++; else $offline++;
 }
 ?>
 
 <div class="page-header">
-    <div class="page-header-top">
-        <div>
-            <h1 class="page-title">📹 Surveillance Control Center</h1>
-            <p class="page-subtitle">Manage and monitor all camera feeds across campus</p>
-        </div>
-        <div class="header-actions">
-            <button class="btn btn-secondary" data-modal="addCameraModal">
-                <span>➕</span>
-                <span>Add Camera</span>
-            </button>
-            <button class="btn btn-primary" onclick="window.location.href='3d-map.php'">
-                <span>🗺️</span>
-                <span>3D Map View</span>
-            </button>
-        </div>
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">Cameras</h1>
+      <p class="page-subtitle">Surveillance system overview and management</p>
     </div>
-</div>
-
-<!-- Camera Grid -->
-<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: var(--spacing-lg); margin-bottom: var(--spacing-xl);">
-    <?php
-    if (isset($cameras)) {
-        foreach ($cameras as $camera) {
-            $data = $camera->data();
-            $cameraId = $camera->id();
-            $isOnline = false;
-            
-            if ($data['isActive'] ?? false) {
-                $lastActive = $data['lastActive'] ?? null;
-                if ($lastActive) {
-                    // FIX: Check the type of $lastActive and handle accordingly
-                    if (is_object($lastActive) && method_exists($lastActive, 'getTimestamp')) {
-                        // It's a Firestore Timestamp object
-                        $diff = time() - $lastActive->getTimestamp();
-                        $isOnline = $diff < 120;
-                    } elseif ($lastActive instanceof DateTime) {
-                        // It's already a DateTime object
-                        $diff = time() - $lastActive->getTimestamp();
-                        $isOnline = $diff < 120;
-                    } elseif (is_string($lastActive)) {
-                        // It's a string timestamp
-                        $timestamp = strtotime($lastActive);
-                        $diff = time() - $timestamp;
-                        $isOnline = $diff < 120;
-                    } elseif (is_array($lastActive) && isset($lastActive['seconds'])) {
-                        // It's an array with seconds (Firestore format)
-                        $diff = time() - $lastActive['seconds'];
-                        $isOnline = $diff < 120;
-                    }
-                }
-            }
-            
-            $cameraTypes = ['MJPEG', 'RTSP', 'HLS', 'WebRTC'];
-            $typeIndex = $data['type'] ?? 0;
-            $typeName = $cameraTypes[$typeIndex] ?? 'Unknown';
-            ?>
-            <div class="card" style="position: relative; overflow: hidden;">
-                <!-- Status Indicator -->
-                <div style="position: absolute; top: 1rem; right: 1rem; z-index: 10;">
-                    <span class="badge badge-<?php echo $isOnline ? 'success' : 'danger'; ?>">
-                        <span class="status-dot <?php echo $isOnline ? 'online' : 'offline'; ?>"></span>
-                        <?php echo $isOnline ? 'Live' : 'Offline'; ?>
-                    </span>
-                </div>
-                
-                <!-- Stream Preview -->
-                <div style="background: #000; aspect-ratio: 16/9; border-radius: var(--radius-md); overflow: hidden; margin-bottom: var(--spacing-md); position: relative;">
-                    <?php if ($isOnline && ($data['isActive'] ?? false)): ?>
-                        <img 
-                            src="<?php echo htmlspecialchars($data['streamUrl'] ?? ''); ?>" 
-                            alt="<?php echo htmlspecialchars($data['name']); ?>"
-                            style="width: 100%; height: 100%; object-fit: cover;"
-                            onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\'%3E%3Crect fill=\'%23334155\' width=\'100\' height=\'100\'/%3E%3Ctext x=\'50%\' y=\'50%\' text-anchor=\'middle\' dominant-baseline=\'middle\' fill=\'%2394a3b8\' font-family=\'sans-serif\' font-size=\'14\'%3ENo Signal%3C/text%3E%3C/svg%3E'"
-                        >
-                    <?php else: ?>
-                        <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">
-                            <div style="text-align: center;">
-                                <div style="font-size: 3rem; margin-bottom: 0.5rem;">📹</div>
-                                <div>Camera Offline</div>
-                            </div>
-                        </div>
-                    <?php endif; ?>
-                    
-                    <!-- Quick Actions Overlay -->
-                    <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); padding: var(--spacing-md); display: flex; gap: var(--spacing-sm);">
-                        <button class="btn btn-sm btn-ghost" onclick="openStreamWindow('<?php echo htmlspecialchars($data['streamUrl'] ?? ''); ?>')">
-                            <span>🔗</span>
-                        </button>
-                        <button class="btn btn-sm btn-ghost" onclick="testCameraStream('<?php echo $cameraId; ?>')">
-                            <span>🧪</span>
-                        </button>
-                        <button class="btn btn-sm btn-ghost" onclick="refreshCamera('<?php echo $cameraId; ?>')">
-                            <span>↻</span>
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Camera Info -->
-                <div>
-                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: var(--spacing-sm);">
-                        <?php echo htmlspecialchars($data['name'] ?? 'Unknown Camera'); ?>
-                    </h3>
-                    
-                    <div style="display: flex; flex-wrap: wrap; gap: var(--spacing-sm); margin-bottom: var(--spacing-md);">
-                        <span class="badge badge-primary"><?php echo $typeName; ?></span>
-                        <span class="badge badge-info">
-                            <?php
-                            if (isset($services)) {
-                                $serviceName = 'Unassigned';
-                                foreach ($services as $service) {
-                                    if ($service->id() === ($data['serviceId'] ?? '')) {
-                                        $serviceName = $service->data()['name'] ?? 'Unknown';
-                                        break;
-                                    }
-                                }
-                                echo $serviceName;
-                            }
-                            ?>
-                        </span>
-                    </div>
-                    
-                    <?php if (!empty($data['description'])): ?>
-                        <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: var(--spacing-md);">
-                            <?php echo htmlspecialchars($data['description']); ?>
-                        </p>
-                    <?php endif; ?>
-                    
-                    <!-- Position Info -->
-                    <div style="display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-md); font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">
-                        <div>X: <?php echo number_format($data['position']['x'] ?? 0, 1); ?></div>
-                        <div>Y: <?php echo number_format($data['position']['y'] ?? 0, 1); ?></div>
-                        <div>Z: <?php echo number_format($data['position']['z'] ?? 0, 1); ?></div>
-                    </div>
-                    
-                    <!-- Actions -->
-                    <div style="display: flex; gap: var(--spacing-sm); padding-top: var(--spacing-md); border-top: 1px solid var(--glass-border);">
-                        <button class="btn btn-secondary btn-sm" onclick="editCamera('<?php echo $cameraId; ?>', <?php echo htmlspecialchars(json_encode($data, JSON_HEX_APOS | JSON_HEX_QUOT)); ?>)">
-                            <span>✏️</span>
-                            <span>Edit</span>
-                        </button>
-                        <button class="btn btn-ghost btn-sm" onclick="duplicateCamera('<?php echo $cameraId; ?>')">
-                            <span>📋</span>
-                            <span>Duplicate</span>
-                        </button>
-                        <button class="btn btn-danger btn-sm" onclick="deleteCamera('<?php echo $cameraId; ?>', '<?php echo htmlspecialchars(addslashes($data['name'] ?? '')); ?>')" style="margin-left: auto;">
-                            <span>🗑️</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <?php
-        }
-    } else {
-        echo '<div class="card" style="grid-column: 1 / -1; text-align: center; padding: 4rem;">
-                <div style="font-size: 4rem; margin-bottom: 1rem;">📹</div>
-                <h3>No cameras yet</h3>
-                <p style="color: var(--text-muted); margin: 1rem 0;">Add your first camera to get started</p>
-                <button class="btn btn-primary" data-modal="addCameraModal">Add Camera</button>
-              </div>';
-    }
-    ?>
-</div>
-
-<!-- Add Camera Modal -->
-<div id="addCameraModal" class="modal-overlay">
-    <div class="modal">
-        <div class="modal-header">
-            <h2 class="modal-title">➕ Add New Camera</h2>
-            <button class="modal-close">×</button>
-        </div>
-        <form data-ajax action="<?= BASE_PATH ?>/api/cameras_create.php" method="POST">
-            <input type="hidden" name="action" value="create">
-            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-            
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Camera Name *</label>
-                    <input type="text" name="name" class="form-input" required placeholder="e.g. ICT Printing Front">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Service *</label>
-                    <select name="serviceId" class="form-select" required>
-                        <option value="">Select service...</option>
-                        <?php
-                        if (isset($services)) {
-                            foreach ($services as $service) {
-                                $sData = $service->data();
-                                echo '<option value="' . htmlspecialchars($service->id()) . '">' . htmlspecialchars($sData['name'] ?? 'Unknown') . '</option>';
-                            }
-                        }
-                        ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Stream URL *</label>
-                    <input type="url" name="streamUrl" class="form-input" required placeholder="http://192.168.1.102:8080/video">
-                    <span class="form-help">Full URL to camera stream</span>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Camera Type *</label>
-                    <select name="type" class="form-select" required>
-                        <option value="0">MJPEG (IP Webcam)</option>
-                        <option value="1">RTSP (Raspberry Pi)</option>
-                        <option value="2">HLS</option>
-                        <option value="3">WebRTC</option>
-                    </select>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--spacing-md);">
-                    <div class="form-group">
-                        <label class="form-label">Position X</label>
-                        <input type="number" step="0.1" name="positionX" class="form-input" value="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Position Y</label>
-                        <input type="number" step="0.1" name="positionY" class="form-input" value="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Position Z</label>
-                        <input type="number" step="0.1" name="positionZ" class="form-input" value="0" required>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Description</label>
-                    <textarea name="description" class="form-textarea" rows="3" placeholder="Optional notes about this camera"></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" name="isActive" checked>
-                        <span>Camera is active</span>
-                    </label>
-                </div>
-            </div>
-            
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
-                <button type="submit" class="btn btn-primary">
-                    <span>➕</span>
-                    <span>Add Camera</span>
-                </button>
-            </div>
-        </form>
+    <?php if (isAdmin()): ?>
+    <div class="header-actions">
+      <button class="btn btn-primary" data-modal="createCameraModal">＋ Add Camera</button>
     </div>
+    <?php endif; ?>
+  </div>
 </div>
 
-<!-- Edit Camera Modal -->
-<div id="editCameraModal" class="modal-overlay" style="display: none;">
-    <div class="modal">
-        <div class="modal-header">
-            <h2 class="modal-title">✏️ Edit Camera</h2>
-            <button class="modal-close" onclick="app.hideModal('editCameraModal')">×</button>
-        </div>
-        <form data-ajax action="<?= BASE_PATH ?>/api/cameras_update.php" method="POST">
-            <input type="hidden" name="action" value="update">
-            <input type="hidden" name="id" id="editCameraId" value="">
-            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-            
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Camera Name *</label>
-                    <input type="text" name="name" id="editCameraName" class="form-input" required placeholder="e.g. ICT Printing Front">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Service *</label>
-                    <select name="serviceId" id="editCameraServiceId" class="form-select" required>
-                        <option value="">Select service...</option>
-                        <?php
-                        if (isset($services)) {
-                            foreach ($services as $service) {
-                                $sData = $service->data();
-                                echo '<option value="' . htmlspecialchars($service->id()) . '">' . htmlspecialchars($sData['name'] ?? 'Unknown') . '</option>';
-                            }
-                        }
-                        ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Stream URL *</label>
-                    <input type="url" name="streamUrl" id="editStreamUrl" class="form-input" required placeholder="http://192.168.1.102:8080/video">
-                    <span class="form-help">Full URL to camera stream</span>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Camera Type *</label>
-                    <select name="type" id="editCameraType" class="form-select" required>
-                        <option value="0">MJPEG (IP Webcam)</option>
-                        <option value="1">RTSP (Raspberry Pi)</option>
-                        <option value="2">HLS</option>
-                        <option value="3">WebRTC</option>
-                    </select>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--spacing-md);">
-                    <div class="form-group">
-                        <label class="form-label">Position X</label>
-                        <input type="number" step="0.1" name="positionX" id="editPositionX" class="form-input" value="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Position Y</label>
-                        <input type="number" step="0.1" name="positionY" id="editPositionY" class="form-input" value="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Position Z</label>
-                        <input type="number" step="0.1" name="positionZ" id="editPositionZ" class="form-input" value="0" required>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Description</label>
-                    <textarea name="description" id="editDescription" class="form-textarea" rows="3" placeholder="Optional notes about this camera"></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" name="isActive" id="editIsActive">
-                        <span>Camera is active</span>
-                    </label>
-                </div>
-            </div>
-            
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="app.hideModal('editCameraModal')">Cancel</button>
-                <button type="submit" class="btn btn-primary">
-                    <span>💾</span>
-                    <span>Update Camera</span>
-                </button>
-            </div>
-        </form>
+<?php if ($flash): ?>
+<div class="alert alert-<?= $flash['success']?'success':'danger' ?> mb-6">
+  <?= $flash['success']?'✅':'❌' ?> <?= h($flash['message']) ?>
+</div>
+<?php endif; ?>
+
+<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:24px">
+  <div class="stat-card blue"><div class="stat-icon">📹</div><div class="stat-label">Total Cameras</div><div class="stat-value blue"><?= count($cameras) ?></div></div>
+  <div class="stat-card green"><div class="stat-icon">🟢</div><div class="stat-label">Online</div><div class="stat-value green"><?= $online ?></div><div class="stat-sub">Heartbeat &lt; 2min</div></div>
+  <div class="stat-card red"><div class="stat-icon">🔴</div><div class="stat-label">Offline</div><div class="stat-value red"><?= $offline ?></div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+<?php foreach ($cameras as $cam):
+  $camId = $cam['_id'];
+  $lastActive = $cam['lastActive'] ?? null;
+  $isOnline = ($cam['isActive']??false) && $lastActive && (time()-strtotime($lastActive)) < 120;
+  $lastActiveStr = $lastActive ? date('M j H:i', strtotime($lastActive)) : 'Never';
+  $linkedService = $sMap[$cam['serviceId'] ?? ''] ?? null;
+?>
+<div class="card" style="<?= !$isOnline && ($cam['isActive']??false) ? 'border-color:rgba(248,113,113,.3)' : '' ?>">
+  <div class="card-header">
+    <div>
+      <div class="card-title"><?= h($cam['name'] ?? 'Camera') ?></div>
+      <div style="margin-top:4px">
+        <?php if ($isOnline): ?>
+          <span class="badge badge-online"><span class="pulse-dot green"></span> Online</span>
+        <?php elseif ($cam['isActive'] ?? false): ?>
+          <span class="badge badge-offline"><span class="pulse-dot red"></span> No Heartbeat</span>
+        <?php else: ?>
+          <span class="badge badge-offline">● Disabled</span>
+        <?php endif; ?>
+      </div>
     </div>
+    <?php if (isAdmin()): ?>
+    <form method="POST" style="display:inline">
+      <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+      <input type="hidden" name="action" value="toggle_camera">
+      <input type="hidden" name="cameraId" value="<?= h($camId) ?>">
+      <input type="hidden" name="new_state" value="<?= ($cam['isActive']??false)?'0':'1' ?>">
+      <button type="submit" class="btn btn-ghost btn-sm btn-icon" title="Toggle">
+        <?= ($cam['isActive']??false) ? '⏸' : '▶' ?>
+      </button>
+    </form>
+    <?php endif; ?>
+  </div>
+  <div style="padding:14px 20px;display:flex;flex-direction:column;gap:8px">
+    <?php if (!empty($cam['location'])): ?>
+    <div class="state-row"><span class="state-label">Location</span><span class="state-val"><?= h($cam['location']) ?></span></div>
+    <?php endif; ?>
+    <?php if ($linkedService): ?>
+    <div class="state-row"><span class="state-label">Service</span><span class="state-val"><?= h($linkedService) ?></span></div>
+    <?php endif; ?>
+    <div class="state-row"><span class="state-label">Last Heartbeat</span><span class="state-val"><?= h($lastActiveStr) ?></span></div>
+    <?php if (!empty($cam['streamUrl'])): ?>
+    <div class="state-row"><span class="state-label">Stream</span><span class="state-val" style="font-size:.65rem"><?= h(substr($cam['streamUrl'],0,30)).'...' ?></span></div>
+    <?php endif; ?>
+  </div>
+  <?php if (isAdmin()): ?>
+  <div style="padding:10px 16px;border-top:1px solid var(--c-border);display:flex;justify-content:flex-end">
+    <form method="POST" style="display:inline">
+      <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+      <input type="hidden" name="action" value="delete_camera">
+      <input type="hidden" name="cameraId" value="<?= h($camId) ?>">
+      <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete this camera?')">🗑 Delete</button>
+    </form>
+  </div>
+  <?php endif; ?>
+</div>
+<?php endforeach; ?>
+<?php if (empty($cameras)): ?>
+<div class="empty-state" style="grid-column:1/-1">
+  <div class="empty-state-icon">📹</div>
+  <div class="empty-state-title">No cameras configured</div>
+  <?php if (isAdmin()): ?><div class="empty-state-text">Add your first camera to start monitoring.</div><?php endif; ?>
+</div>
+<?php endif; ?>
 </div>
 
-<script>
-(function () {
-    // Ensure global app exists
-    if (typeof window.app === 'undefined') {
-        window.app = {
-            showModal: function(modalId) {
-                const el = document.getElementById(modalId);
-                if (el) el.style.display = 'flex';
-            },
-            hideModal: function(modalId) {
-                const el = document.getElementById(modalId);
-                if (el) el.style.display = 'none';
-            },
-            showNotification: function(message, type) {
-                alert(message);
-            }
-        };
-    }
+<?php if (isAdmin()): ?>
+<div class="modal-overlay" id="createCameraModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">＋ Add Camera</span>
+      <button class="modal-close" data-close-modal>✕</button>
+    </div>
+    <form method="POST">
+      <div class="modal-body">
+        <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+        <input type="hidden" name="action" value="create_camera">
+        <div class="form-group">
+          <label class="form-label">Camera Name *</label>
+          <input class="form-control" name="name" required placeholder="e.g. Lobby Cam 01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Physical Location</label>
+          <input class="form-control" name="location" placeholder="e.g. Building A Entrance">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Linked Service</label>
+          <select class="form-control" name="serviceId">
+            <option value="">— None —</option>
+            <?php foreach ($services as $s): ?>
+            <option value="<?= h($s['_id']) ?>"><?= h($s['name'] ?? $s['_id']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stream URL</label>
+          <input class="form-control" name="streamUrl" type="url" placeholder="rtsp://... or https://...">
+          <div class="form-hint">RTSP or HLS stream URL for live preview</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Camera</button>
+      </div>
+    </form>
+  </div>
+</div>
+<?php endif; ?>
 
-    // ✅ Open modal buttons: data-modal="addCameraModal"
-    document.querySelectorAll('[data-modal]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const modalId = btn.getAttribute('data-modal');
-            window.app.showModal(modalId);
-        });
-    });
-
-    // ✅ Close buttons: .modal-close
-    document.querySelectorAll('.modal-close').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const overlay = btn.closest('.modal-overlay');
-            if (overlay) overlay.style.display = 'none';
-        });
-    });
-
-    // ✅ Close buttons: [data-modal-close]
-    document.querySelectorAll('[data-modal-close]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const overlay = btn.closest('.modal-overlay');
-            if (overlay) overlay.style.display = 'none';
-        });
-    });
-
-    // ✅ Close if click outside modal content
-    document.querySelectorAll('.modal-overlay').forEach(overlay => {
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                overlay.style.display = 'none';
-            }
-        });
-    });
-})();
-
-// ---------------- Your existing functions ----------------
-function openStreamWindow(url) {
-    window.open(url, '_blank', 'width=800,height=600');
-}
-
-function testCameraStream(cameraId) {
-    app.showNotification('Testing camera stream...', 'info');
-}
-
-function refreshCamera(cameraId) {
-    location.reload();
-}
-
-function editCamera(cameraId, cameraData) {
-    document.getElementById('editCameraId').value = cameraId;
-    document.getElementById('editCameraName').value = cameraData.name || '';
-    document.getElementById('editCameraServiceId').value = cameraData.serviceId || '';
-    document.getElementById('editStreamUrl').value = cameraData.streamUrl || '';
-
-    // force string for select
-    document.getElementById('editCameraType').value = String(cameraData.type ?? 0);
-
-    document.getElementById('editPositionX').value = cameraData.position?.x ?? 0;
-    document.getElementById('editPositionY').value = cameraData.position?.y ?? 0;
-    document.getElementById('editPositionZ').value = cameraData.position?.z ?? 0;
-
-    document.getElementById('editDescription').value = cameraData.description || '';
-    document.getElementById('editIsActive').checked = !!cameraData.isActive;
-
-    // Show modal
-    app.showModal('editCameraModal');
-}
-
-function duplicateCamera(cameraId) {
-    app.showNotification('Duplicate feature coming soon', 'info');
-}
-
-function deleteCamera(cameraId, name) {
-    if (!confirm(`Are you sure you want to delete camera "${name}"?`)) return;
-
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = '<?= BASE_PATH ?>/api/cameras_delete.php';
-
-    const idInput = document.createElement('input');
-    idInput.type = 'hidden';
-    idInput.name = 'id';
-    idInput.value = cameraId;
-
-    const csrfInput = document.createElement('input');
-    csrfInput.type = 'hidden';
-    csrfInput.name = 'csrf_token';
-    csrfInput.value = '<?php echo generateCSRFToken(); ?>';
-
-    form.appendChild(idInput);
-    form.appendChild(csrfInput);
-    document.body.appendChild(form);
-    form.submit();
-}
-</script>
-
-
-<?php include '../includes/footer.php'; ?>
+<?php include __DIR__ . '/../includes/footer.php'; ?>

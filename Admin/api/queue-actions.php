@@ -1,135 +1,97 @@
 <?php
+// api/queue-actions.php — v6: CSRF, service access, permission checks, split expire modes
+ini_set('display_errors', 0);
+error_reporting(0);
+
 require_once __DIR__ . '/../config/config.php';
 requireRole(ROLE_STAFF);
 
 require_once __DIR__ . '/../config/firestore_rest.php';
+require_once __DIR__ . '/../services/QueueService.php';
 
 header('Content-Type: application/json');
 
-function jsonResponse(array $data, int $status = 200): void {
-    http_response_code($status);
-    echo json_encode($data);
-    exit;
-}
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonResponse(false, 'Method not allowed', [], 405);
+requireCSRF();
 
-// Parse JSON body for POST requests
-$input = json_decode(file_get_contents('php://input'), true);
-if (!is_array($input)) $input = $_POST;
+$action    = trim($_POST['action']    ?? '');
+$serviceId = trim($_POST['serviceId'] ?? '');
+$entryId   = trim($_POST['entryId']   ?? '');
+$reason    = trim($_POST['reason']    ?? '');
+$override  = !empty($_POST['override']) && isAdmin();
 
-$action    = $input['action'] ?? '';
-$serviceId = $input['serviceId'] ?? '';
+if (!$serviceId) jsonResponse(false, 'Missing serviceId');
 
-if ($action === '' || $serviceId === '') {
-    jsonResponse(['success' => false, 'message' => 'action and serviceId required'], 400);
-}
-
-function nowIso(): string {
-    return gmdate('c'); // ISO timestamp string
-}
+// Service-level access gate
+requireServiceAccess($serviceId);
 
 try {
-    if ($action === 'call_next') {
+    switch ($action) {
 
-        // Query first pending entry in subcollection services/{serviceId}/entries
-        $results = firestore_runQueryWithParent("services/$serviceId", [
-            "from" => [["collectionId" => "entries"]],
-            "where" => [
-                "fieldFilter" => [
-                    "field" => ["fieldPath" => "status"],
-                    "op" => "EQUAL",
-                    "value" => ["stringValue" => "pending"]
-                ]
-            ],
-            "orderBy" => [[
-                "field" => ["fieldPath" => "joinedAt"],
-                "direction" => "ASCENDING"
-            ]],
-            "limit" => 1
-        ]);
+        case 'call_head':
+            $result = QueueService::callHead($serviceId);
+            break;
 
-        $doc = null;
-        foreach ($results as $row) {
-            if (!empty($row['document'])) { $doc = $row['document']; break; }
-        }
+        case 'recall_head':
+            $result = QueueService::recallHead($serviceId);
+            break;
 
-        if (!$doc) {
-            jsonResponse(['success' => false, 'message' => 'No pending entries'], 404);
-        }
+        case 'check_in':
+            $result = QueueService::checkInCalled($serviceId);
+            break;
 
-        // Extract entryId from full name
-        // name: projects/.../documents/services/{serviceId}/entries/{entryId}
-        $fullName = $doc['name'] ?? '';
-        $parts = explode('/entries/', $fullName);
-        $entryId = $parts[1] ?? '';
-        if ($entryId === '') {
-            jsonResponse(['success' => false, 'message' => 'Could not determine entryId'], 500);
-        }
+        case 'mark_served':
+            if (!$entryId) { $result = ['success' => false, 'message' => 'Missing entryId']; break; }
+            if ($override && !isAdmin()) { $result = ['success' => false, 'message' => 'Override requires admin']; break; }
+            $result = QueueService::markServed($serviceId, $entryId, $override, $reason);
+            break;
 
-        // Update entry => active
-        firestore_updateDocument("services/$serviceId/entries/$entryId", [
-            'status'   => 'active',
-            'calledAt' => nowIso(),
-            'calledBy' => $_SESSION['user_id'] ?? 'staff',
-        ]);
+        case 'mark_left':
+            if (!$entryId) { $result = ['success' => false, 'message' => 'Missing entryId']; break; }
+            // Map reason from POST to semantic key
+            $leftReason = $reason ?: 'pending_left';
+            if (!array_key_exists($leftReason, QueueService::LEFT_REASONS)) {
+                $leftReason = 'pending_left';
+            }
+            $result = QueueService::markLeft($serviceId, $entryId, $leftReason);
+            break;
 
-        // Update service counts
-        $svc = firestore_getDocument("services/$serviceId");
-        $pendingCount = (int)($svc['pendingCount'] ?? 0);
-        $activeCount  = (int)($svc['activeCount'] ?? 0);
+        case 'expire_called':
+            // Normal expire: no override (only works if window passed)
+            $result = QueueService::expireCalled($serviceId, false, '');
+            break;
 
-        firestore_updateDocument("services/$serviceId", [
-            'pendingCount'  => max(0, $pendingCount - 1),
-            'activeCount'   => $activeCount + 1,
-            'lastUpdatedAt' => nowIso(),
-        ]);
+        case 'force_expire_called':
+            // Early/force expire: admin only + reason
+            if (!isAdmin()) { $result = ['success' => false, 'message' => 'Force expire requires admin']; break; }
+            if (!$reason)   { $result = ['success' => false, 'message' => 'Force expire requires a reason']; break; }
+            $result = QueueService::expireCalled($serviceId, true, $reason);
+            break;
 
-        jsonResponse(['success' => true, 'message' => 'Next person called', 'reload' => true]);
+        case 'repair':
+            requirePermission('canRepairQueue');
+            $result = QueueService::repairService($serviceId);
+            break;
+
+        case 'purge_entry':
+            requirePermission('canPurgeEntry');
+            if (!$entryId) { $result = ['success' => false, 'message' => 'Missing entryId']; break; }
+            if (!$reason)  { $result = ['success' => false, 'message' => 'Purge requires a reason']; break; }
+            $result = QueueService::purgeEntry($serviceId, $entryId, $reason);
+            break;
+
+        case 'sync_state':
+            requirePermission('canRepairQueue');
+            QueueService::syncServiceState($serviceId);
+            $result = ['success' => true, 'message' => 'Service state synced'];
+            break;
+
+        default:
+            $result = ['success' => false, 'message' => "Unknown action: $action"];
     }
 
-    if ($action === 'mark_served') {
-        $entryId = $input['entryId'] ?? '';
-        if ($entryId === '') {
-            jsonResponse(['success' => false, 'message' => 'entryId required'], 400);
-        }
-
-        // Read entry to know its status (pending/active)
-        $entry = firestore_getDocument("services/$serviceId/entries/$entryId");
-        if (!$entry) {
-            jsonResponse(['success' => false, 'message' => 'Entry not found'], 404);
-        }
-
-        $status = $entry['status'] ?? 'pending';
-
-        // Mark served (optional) then delete (keeps list clean)
-        firestore_updateDocument("services/$serviceId/entries/$entryId", [
-            'status'   => 'served',
-            'servedAt' => nowIso(),
-            'servedBy' => $_SESSION['user_id'] ?? 'staff',
-        ]);
-
-        firestore_deleteDocument("services/$serviceId/entries/$entryId");
-
-        // Update counts
-        $svc = firestore_getDocument("services/$serviceId");
-        $pendingCount = (int)($svc['pendingCount'] ?? 0);
-        $activeCount  = (int)($svc['activeCount'] ?? 0);
-        $totalServed  = (int)($svc['totalServed'] ?? 0);
-
-        $updates = [
-            'totalServed'   => $totalServed + 1,
-            'lastUpdatedAt' => nowIso(),
-        ];
-
-        if ($status === 'active') $updates['activeCount']  = max(0, $activeCount - 1);
-        else                     $updates['pendingCount'] = max(0, $pendingCount - 1);
-
-        firestore_updateDocument("services/$serviceId", $updates);
-
-        jsonResponse(['success' => true, 'message' => 'Entry served', 'reload' => true]);
-    }
-
-    jsonResponse(['success' => false, 'message' => 'Unknown action'], 400);
-
+    echo json_encode($result);
 } catch (Throwable $e) {
-    jsonResponse(['success' => false, 'message' => 'Failed: ' . $e->getMessage()], 500);
+    error_log('queue-actions.php: ' . $e->getMessage());
+    jsonResponse(false, 'Server error', [], 500);
 }

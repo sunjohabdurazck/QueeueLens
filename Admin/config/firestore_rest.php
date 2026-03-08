@@ -344,3 +344,31 @@ function firestore_findUserByEmail(string $email): ?array {
 
     return null;
 }
+
+/**
+ * Returns the Firebase project ID from service account JSON or env var.
+ * Defined here (firestore_rest.php) as single canonical location.
+ * DO NOT redefine this function in api/login.php or elsewhere.
+ */
+if (!function_exists('getFirebaseProjectId')) {
+    function getFirebaseProjectId(): string {
+        // Prefer env var (production)
+        $fromEnv = getenv('FIREBASE_PROJECT_ID');
+        if ($fromEnv) return trim($fromEnv);
+
+        // Fallback: read from service account key path (dev only)
+        $keyPath = getenv('FIREBASE_SERVICE_ACCOUNT') ?: '';
+        if (!$keyPath) {
+            // Last-resort dev fallback - outside web root preferred
+            $keyPath = dirname(__DIR__, 2) . '/serviceAccountKey.json';
+            if (!file_exists($keyPath)) {
+                $keyPath = __DIR__ . '/serviceAccountKey.json';
+            }
+        }
+        if (file_exists($keyPath)) {
+            $j = json_decode(file_get_contents($keyPath), true);
+            return $j['project_id'] ?? '';
+        }
+        return '';
+    }
+}

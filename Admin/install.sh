@@ -1,104 +1,83 @@
 #!/bin/bash
+# QueueLens Admin v6 — Setup Script (env-based secrets only)
 
 echo "============================================"
-echo " Queue Master Admin System - Quick Setup"
+echo " QueueLens Admin v6 — Setup"
 echo "============================================"
 echo ""
 
 # Check PHP
-echo "[1/5] Checking PHP installation..."
-if ! command -v php &> /dev/null; then
-    echo "❌ ERROR: PHP is not installed"
-    echo "Please install PHP 7.4+ from https://www.php.net/"
+echo "[1/4] Checking PHP..."
+if ! command -v php &>/dev/null; then
+    echo "❌ PHP not found. Install PHP 8.1+"
     exit 1
 fi
-echo "✓ PHP is installed ($(php -v | head -n 1))"
+echo "✓ PHP: $(php -v | head -n1)"
 
 # Check Composer
 echo ""
-echo "[2/5] Checking Composer installation..."
-if ! command -v composer &> /dev/null; then
-    echo "❌ ERROR: Composer is not installed"
-    echo "Please install Composer from https://getcomposer.org/"
+echo "[2/4] Checking Composer..."
+if ! command -v composer &>/dev/null; then
+    echo "❌ Composer not found. Install from https://getcomposer.org/"
     exit 1
 fi
-echo "✓ Composer is installed"
+echo "✓ Composer: $(composer --version)"
 
 # Install dependencies
 echo ""
-echo "[3/5] Installing PHP dependencies..."
-composer install
-if [ $? -ne 0 ]; then
-    echo "❌ ERROR: Failed to install dependencies"
-    exit 1
-fi
+echo "[3/4] Installing PHP dependencies..."
+composer install --no-dev --optimize-autoloader
+if [ $? -ne 0 ]; then echo "❌ composer install failed"; exit 1; fi
 echo "✓ Dependencies installed"
 
-# Check Firebase config
+# Environment check
 echo ""
-echo "[4/5] Checking Firebase configuration..."
-if [ ! -f "config/serviceAccountKey.json" ]; then
-    echo "⚠️  WARNING: Firebase service account key not found!"
-    echo ""
-    echo "Please follow these steps:"
-    echo "1. Go to Firebase Console: https://console.firebase.google.com/"
-    echo "2. Select your project"
-    echo "3. Go to Project Settings > Service Accounts"
-    echo "4. Click 'Generate New Private Key'"
-    echo "5. Save the JSON file as: config/serviceAccountKey.json"
-    echo ""
-    read -p "Press ENTER when you've added the file..."
-    
-    if [ ! -f "config/serviceAccountKey.json" ]; then
-        echo "❌ ERROR: Service account key still not found!"
-        exit 1
-    fi
-fi
-echo "✓ Firebase configuration found"
+echo "[4/4] Checking required environment variables..."
 
-# Check Apache/Web Server
-echo ""
-echo "[5/5] Checking web server..."
-if command -v apachectl &> /dev/null; then
-    if pgrep httpd > /dev/null || pgrep apache2 > /dev/null; then
-        echo "✓ Apache is running"
+MISSING=0
+
+check_env() {
+    local VAR=$1
+    local DESC=$2
+    if [ -z "${!VAR}" ]; then
+        echo "  ⚠️  Missing: $VAR — $DESC"
+        MISSING=$((MISSING+1))
     else
-        echo "⚠️  WARNING: Apache is not running"
-        echo "Please start Apache/XAMPP"
+        echo "  ✓ $VAR is set"
     fi
+}
+
+check_env "FIREBASE_PROJECT_ID"      "Your Firebase project ID (e.g. queuelens)"
+check_env "FIREBASE_SERVICE_ACCOUNT" "Absolute path to service account JSON key (OUTSIDE web root)"
+check_env "FIREBASE_API_KEY"         "Firebase Web API key (for client-side auth)"
+check_env "FIREBASE_AUTH_DOMAIN"     "Firebase auth domain (e.g. queuelens.firebaseapp.com)"
+
+if [ $MISSING -gt 0 ]; then
+    echo ""
+    echo "⚠️  Set the missing environment variables before running."
+    echo ""
+    echo "Recommended: add to /etc/environment or your web server vhost config:"
+    echo ""
+    echo "  SetEnv FIREBASE_PROJECT_ID       your-project-id"
+    echo "  SetEnv FIREBASE_SERVICE_ACCOUNT  /etc/queuelens/serviceAccountKey.json"
+    echo "  SetEnv FIREBASE_API_KEY          AIza..."
+    echo "  SetEnv FIREBASE_AUTH_DOMAIN      your-project.firebaseapp.com"
+    echo ""
+    echo "⚠️  NEVER place serviceAccountKey.json inside the web root or app folder."
+    echo ""
 else
-    echo "⚠️  WARNING: Apache not detected"
-    echo "Make sure your web server is running"
+    echo ""
+    echo "✓ All environment variables set"
 fi
 
 echo ""
 echo "============================================"
-echo " Setup Complete! 🎉"
+echo " Setup complete!"
 echo "============================================"
 echo ""
-echo "Next steps:"
-echo "1. Make sure Apache/web server is running"
-echo "2. Create admin user in Firebase Console:"
-echo "   - Collection: users"
-echo "   - Document ID: [your Firebase Auth UID]"
-echo "   - Fields: { role: \"admin\", name: \"Your Name\", email: \"your@email.com\" }"
+echo "Next: verify a staff/admin user exists in Firestore:"
+echo "  Collection: users"
+echo "  Document ID: [Firebase Auth UID]"
+echo "  Fields: { role: 'admin', name: 'Name', email: 'email', isActive: true }"
 echo ""
-echo "3. Visit: http://localhost/queuelens/"
-echo "4. Login with your Firebase credentials"
-echo ""
-echo "Documentation:"
-echo "- Quick Start: GETTING_STARTED.md"
-echo "- Full Guide: README.md"
-echo "- Setup Help: SETUP.md"
-echo ""
-echo "Opening browser..."
-
-# Try to open browser
-if command -v xdg-open &> /dev/null; then
-    xdg-open "http://localhost/admin_system/"
-elif command -v open &> /dev/null; then
-    open "http://localhost/admin_system/"
-fi
-
-echo ""
-echo "Enjoy your magnificent admin system! 🚀"
+echo "Visit: http://localhost/queuelens/"

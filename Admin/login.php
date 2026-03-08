@@ -1,262 +1,165 @@
+<?php
+ini_set('display_errors', 0);
+error_reporting(0);
+
+if (session_status() === PHP_SESSION_NONE) session_start();
+
+require_once 'config/config.php';
+
+if (isAuthenticated()) { redirectTo('index.php'); }
+
+$error = errorMessageFromQuery();
+$csrfToken = generateCSRFToken();
+
+// Load public Firebase client config
+$fcPath = __DIR__ . '/config/firebase_client.json';
+$firebaseConfig = file_exists($fcPath) ? json_decode(file_get_contents($fcPath), true) : [];
+if (!$firebaseConfig) {
+    $firebaseConfig = [
+        'apiKey'            => getenv('FIREBASE_API_KEY') ?: 'REPLACE_ME',
+        'authDomain'        => getenv('FIREBASE_AUTH_DOMAIN') ?: 'REPLACE_ME',
+        'projectId'         => getenv('FIREBASE_PROJECT_ID') ?: 'REPLACE_ME',
+        'storageBucket'     => getenv('FIREBASE_STORAGE_BUCKET') ?: '',
+        'messagingSenderId' => getenv('FIREBASE_MESSAGING_SENDER_ID') ?: '',
+        'appId'             => getenv('FIREBASE_APP_ID') ?: '',
+    ];
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - QueueLens Admin</title>
-    <link rel="stylesheet" href="assets/css/style.css">
-    <style>
-        .login-container {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: var(--spacing-xl);
-        }
-        
-        .login-box {
-            width: 100%;
-            max-width: 450px;
-        }
-        
-        .login-header {
-            text-align: center;
-            margin-bottom: var(--spacing-xl);
-        }
-        
-        .login-logo {
-            width: 80px;
-            height: 80px;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            border-radius: var(--radius-xl);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 2.5rem;
-            margin-bottom: var(--spacing-lg);
-            box-shadow: var(--shadow-glow);
-            animation: float 3s ease-in-out infinite;
-        }
-        
-        @keyframes float {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
-        
-        .login-title {
-            font-size: 2rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: var(--spacing-sm);
-        }
-        
-        .login-subtitle {
-            color: var(--text-secondary);
-        }
-        
-        .login-card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(20px);
-            border: 1px solid var(--glass-border);
-            border-radius: var(--radius-xl);
-            padding: var(--spacing-xl);
-            box-shadow: var(--shadow-xl);
-        }
-        
-        .input-group {
-            position: relative;
-            margin-bottom: var(--spacing-lg);
-        }
-        
-        .input-icon {
-            position: absolute;
-            left: var(--spacing-md);
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-muted);
-            font-size: 1.25rem;
-        }
-        
-        .input-with-icon {
-            padding-left: 3rem;
-        }
-        
-        .toggle-password {
-            position: absolute;
-            right: var(--spacing-md);
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            font-size: 1.25rem;
-            transition: color var(--transition-fast);
-        }
-        
-        .toggle-password:hover {
-            color: var(--text-primary);
-        }
-        
-        .remember-forgot {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: var(--spacing-lg);
-        }
-        
-        .checkbox-label {
-            display: flex;
-            align-items: center;
-            gap: var(--spacing-sm);
-            cursor: pointer;
-            color: var(--text-secondary);
-        }
-        
-        .checkbox-label input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-        
-        .forgot-link {
-            color: var(--primary-color);
-            text-decoration: none;
-            font-size: 0.875rem;
-            transition: color var(--transition-fast);
-        }
-        
-        .forgot-link:hover {
-            color: var(--primary-light);
-        }
-        
-        .login-footer {
-            text-align: center;
-            margin-top: var(--spacing-xl);
-            color: var(--text-muted);
-            font-size: 0.875rem;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>QueueLens — Sign In</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<script src="<?= BASE_PATH ?>/assets/js/theme.js"></script>
+<link rel="stylesheet" href="<?= BASE_PATH ?>/assets/css/style.css">
 </head>
 <body>
-    <div class="login-container">
-        <div class="login-box">
-            <div class="login-header">
-                <div class="login-logo">🎯</div>
-                <h1 class="login-title">QueueLens</h1>
-                <p class="login-subtitle">Admin & Staff Portal</p>
-            </div>
-            
-            <div class="login-card">
-                <?php if (isset($_GET['error'])): ?>
-                    <div class="alert alert-danger">
-                        <span>⚠</span>
-                        <span>Invalid credentials. Please try again.</span>
-                    </div>
-                <?php endif; ?>
-                
-                <?php if (isset($_GET['logout'])): ?>
-                    <div class="alert alert-success">
-                        <span>✓</span>
-                        <span>You have been logged out successfully.</span>
-                    </div>
-                <?php endif; ?>
-                
-                <form method="POST" action="/queuelens/api/login.php">
-                    <div class="input-group">
-                        <span class="input-icon">📧</span>
-                        <input 
-                            type="email" 
-                            name="email" 
-                            class="form-input input-with-icon" 
-                            placeholder="Email address"
-                            required
-                            autofocus
-                        >
-                    </div>
-                    
-                    <div class="input-group">
-                        <span class="input-icon">🔒</span>
-                        <input 
-                            type="password" 
-                            name="password" 
-                            id="password"
-                            class="form-input input-with-icon" 
-                            placeholder="Password"
-                            required
-                        >
-                        <button type="button" class="toggle-password" onclick="togglePassword()">
-                            👁️
-                        </button>
-                    </div>
-                    
-                    <div class="remember-forgot">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="remember">
-                            <span>Remember me</span>
-                        </label>
-                        <a href="#" class="forgot-link">Forgot password?</a>
-                    </div>
-                    
-                    <button type="submit" class="btn btn-primary btn-lg" style="width: 100%;">
-                        <span>Sign In</span>
-                        <span>→</span>
-                    </button>
-                </form>
-            </div>
-            
-            <div class="login-footer">
-                <p>QueueLens Admin v1.0</p>
-                <p style="margin-top: var(--spacing-sm);">
-                    <span class="status-dot online"></span>
-                    System Online
-                </p>
-            </div>
-        </div>
+<div class="login-page">
+  <div class="login-theme-toolbar">
+    <button type="button" class="theme-btn" data-theme-option="light" aria-pressed="false">☀️ Light</button>
+    <button type="button" class="theme-btn" data-theme-option="dark" aria-pressed="false">🌙 Dark</button>
+    <button type="button" class="theme-btn" data-theme-option="system" aria-pressed="false">💻 System</button>
+  </div>
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-icon">⚡</div>
+      <div>
+        <div class="login-title">QueueLens</div>
+        <div class="login-subtitle">Admin &amp; Staff Portal</div>
+      </div>
     </div>
+
+    <?php if ($error): ?>
+    <div class="alert alert-danger" style="margin-bottom:20px">⚠️ <?= htmlspecialchars($error) ?></div>
+    <?php endif; ?>
+
+    <div id="authErrorMsg" class="alert alert-danger" style="display:none;margin-bottom:20px"></div>
+
+    <div class="alert alert-info" style="margin-bottom:24px;font-size:.78rem">
+      🔒 Sign in with your registered staff or admin Firebase account.
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="email">Email address</label>
+      <input class="form-control" type="email" id="email" required
+             placeholder="you@university.edu" autocomplete="email">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="password">Password</label>
+      <input class="form-control" type="password" id="password" required
+             placeholder="••••••••" autocomplete="current-password">
+      <div class="form-hint">Your Firebase account password</div>
+    </div>
+
+    <button class="btn btn-primary w-full btn-lg" id="loginBtn" onclick="doFirebaseLogin()">
+      <span id="loginSpinner" class="spinner" style="display:none"></span>
+      Sign In
+    </button>
+
+    <!-- Hidden form: only submitted after Firebase confirms credentials -->
+    <form method="POST" action="<?= BASE_PATH ?>/api/login.php" id="loginForm" style="display:none">
+      <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+      <input type="hidden" name="id_token" id="idTokenInput">
+    </form>
+
+    <div style="margin-top:24px;text-align:center">
+      <p style="font-size:.72rem;color:var(--c-text3)">
+        Only staff and admin accounts can access this portal.<br>
+        Students: use the QueueLens mobile app.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script>
+firebase.initializeApp(<?= json_encode($firebaseConfig) ?>);
+const auth = firebase.auth();
+
+// Add debug listener for auth state changes
+auth.onAuthStateChanged((user) => {
+  if (user) {
+    console.log('Auth state changed: User signed in:', user.email);
+  } else {
+    console.log('Auth state changed: No user signed in');
+  }
+});
+
+async function doFirebaseLogin() {
+  const email    = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const btn      = document.getElementById('loginBtn');
+  const spinner  = document.getElementById('loginSpinner');
+
+  hideError();
+  if (!email || !password) { showError('Please enter your email and password.'); return; }
+
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+
+  try {
+    console.log('Attempting Firebase login for:', email);
+    const cred    = await auth.signInWithEmailAndPassword(email, password);
+    console.log('Firebase login successful, getting ID token...');
+    const idToken = await cred.user.getIdToken(true);
+    console.log('ID token obtained, submitting form...');
+    document.getElementById('idTokenInput').value = idToken;
+    document.getElementById('loginForm').submit();
+  } catch (err) {
+    // TEMPORARY DEBUGGING CODE - Shows actual Firebase errors
+    console.error('Firebase login error:', err);
+    console.error('Error code:', err.code);
+    console.error('Error message:', err.message);
+    console.error('Full error object:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
     
-    <script>
-        function togglePassword() {
-            const passwordInput = document.getElementById('password');
-            const type = passwordInput.type === 'password' ? 'text' : 'password';
-            passwordInput.type = type;
-        }
-        
-        // Add floating particles
-        function createParticle() {
-            const particle = document.createElement('div');
-            particle.style.cssText = `
-                position: fixed;
-                width: 4px;
-                height: 4px;
-                background: rgba(99, 102, 241, 0.5);
-                border-radius: 50%;
-                pointer-events: none;
-                z-index: -1;
-                left: ${Math.random() * 100}vw;
-                top: 100vh;
-                animation: float-up ${5 + Math.random() * 5}s linear forwards;
-            `;
-            document.body.appendChild(particle);
-            
-            setTimeout(() => particle.remove(), 10000);
-        }
-        
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes float-up {
-                to {
-                    transform: translateY(-120vh) translateX(${Math.random() * 100 - 50}px);
-                    opacity: 0;
-                }
-            }
-        `;
-        document.head.appendChild(style);
-        
-        setInterval(createParticle, 500);
-    </script>
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    showError((err.code || 'unknown') + ' — ' + (err.message || 'Sign-in failed'));
+  }
+}
+
+function showError(msg) {
+  const el = document.getElementById('authErrorMsg');
+  el.textContent = '⚠️ ' + msg;
+  el.style.display = 'block';
+  console.log('Showing error to user:', msg);
+}
+
+function hideError() {
+  document.getElementById('authErrorMsg').style.display = 'none';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Enter') doFirebaseLogin(); });
+
+// Log the Firebase config being used (without sensitive data)
+console.log('Firebase initialized with config:', {
+  ...<?= json_encode($firebaseConfig) ?>,
+  apiKey: '***hidden***'
+});
+</script>
 </body>
 </html>

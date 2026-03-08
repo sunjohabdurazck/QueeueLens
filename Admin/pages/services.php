@@ -1,451 +1,340 @@
 <?php
-require_once '../config/config.php';
+ini_set('display_errors', 0);
+error_reporting(0);
+
+require_once __DIR__ . '/../config/config.php';
 requireRole(ROLE_STAFF);
+require_once __DIR__ . '/../config/firestore_rest.php';
+require_once __DIR__ . '/../services/AuditService.php';
 
-$pageTitle = 'Services Management';
-include '../includes/header.php';
+$pageTitle = 'Services';
+include __DIR__ . '/../includes/header.php';
 
-// Get all services
-$services = null;
+function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 
-try {
-    require_once '../config/firebase.php';
-    $firebase = FirebaseAdmin::getInstance();
-    $db = $firebase->getFirestore();
+$flash = null;
 
-    $servicesRef = $db->collection('services');
-    $services = $servicesRef->documents();
-} catch (Exception $e) {
-    error_log("Services page error: " . $e->getMessage());
+// Handle POST
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCSRFToken($_POST['csrf_token'] ?? '')) {
+    $action = $_POST['action'] ?? '';
+
+    try {
+        switch ($action) {
+            case 'create_service':
+                if (isAdmin()) {
+                    $doc = [
+                        'name'               => trim($_POST['name'] ?? ''),
+                        'description'        => trim($_POST['description'] ?? ''),
+                        'isOpen'             => false,
+                        'paused'             => false,
+                        'pendingCount'       => 0,
+                        'activeCount'        => 0,
+                        'totalServed'        => 0,
+                        'headPendingEntryId' => null,
+                        'calledEntryId'      => null,
+                        'callExpiresAt'      => null,
+                        'activeEntryId'      => null,
+                        'callWindowSeconds'  => (int)($_POST['callWindowSeconds'] ?? 120),
+                        'maxPending'         => (int)($_POST['maxPending'] ?? 50),
+                        'locationName'       => trim($_POST['locationName'] ?? ''),
+                        'acceptingNewEntries'=> true,
+                        'createdAt'          => fs_timestamp_now(),
+                        'lastUpdatedAt'      => fs_timestamp_now(),
+                        'createdBy'          => $_SESSION['user_id'] ?? 'admin',
+                    ];
+                    $result = firestore_createDocument('services', $doc);
+                    AuditService::log('SERVICE_CREATE', 'services', [], $doc);
+                    $flash = ['success'=>true, 'message'=>'Service created'];
+                }
+                break;
+
+            case 'toggle_open':
+                $svcId = $_POST['serviceId'] ?? '';
+                $newState = ($_POST['new_state'] ?? '1') === '1';
+                if ($svcId) {
+                    firestore_updateDocument("services/$svcId", [
+                        'isOpen'        => $newState,
+                        'paused'        => false,
+                        'lastUpdatedAt' => fs_timestamp_now(),
+                    ]);
+                    AuditService::log($newState?'SERVICE_OPEN':'SERVICE_CLOSE', "services/$svcId", [], ['isOpen'=>$newState], '', $svcId);
+                    $flash = ['success'=>true,'message'=>'Service '.($newState?'opened':'closed')];
+                }
+                break;
+
+            case 'toggle_pause':
+                $svcId = $_POST['serviceId'] ?? '';
+                $paused = ($_POST['paused'] ?? '1') === '1';
+                if ($svcId) {
+                    firestore_updateDocument("services/$svcId", ['paused'=>$paused,'lastUpdatedAt'=>fs_timestamp_now()]);
+                    AuditService::log($paused?'SERVICE_PAUSE':'SERVICE_UNPAUSE', "services/$svcId", [], ['paused'=>$paused], '', $svcId);
+                    $flash = ['success'=>true,'message'=>'Service '.($paused?'paused':'unpaused')];
+                }
+                break;
+
+            case 'delete_service':
+                if (isAdmin()) {
+                    $svcId = $_POST['serviceId'] ?? '';
+                    if ($svcId) {
+                        AuditService::log('SERVICE_DELETE', "services/$svcId", [], [], $_POST['reason']??'', $svcId);
+                        firestore_deleteDocument("services/$svcId");
+                        $flash = ['success'=>true,'message'=>'Service deleted'];
+                    }
+                }
+                break;
+        }
+    } catch (Exception $e) {
+        $flash = ['success'=>false,'message'=>'Error: '.$e->getMessage()];
+    }
 }
+
+$services = [];
+try {
+    $results = firestore_runQuery([
+        "from"    => [["collectionId" => "services"]],
+        "orderBy" => [["field" => ["fieldPath" => "name"], "direction" => "ASCENDING"]],
+        "limit"   => 100
+    ]);
+    foreach ($results as $row) {
+        if (empty($row['document'])) continue;
+        $doc = $row['document'];
+        $d = firestore_unpack_fields($doc['fields'] ?? []);
+        $d['_id'] = basename($doc['name']);
+        $services[] = $d;
+    }
+} catch(Exception $e) { error_log("Services page: ".$e->getMessage()); }
+
+$csrf = generateCSRFToken();
 ?>
 
 <div class="page-header">
-    <div class="page-header-top">
-        <div>
-            <h1 class="page-title">🏢 Services Management</h1>
-            <p class="page-subtitle">Manage all queue services</p>
-        </div>
-        <div class="header-actions">
-            <?php if (hasRole(ROLE_ADMIN)): ?>
-                <button class="btn btn-primary" data-modal="addServiceModal">
-                    <span>➕</span>
-                    <span>Add Service</span>
-                </button>
-            <?php endif; ?>
-        </div>
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">Services</h1>
+      <p class="page-subtitle">Queue service management and operational settings</p>
     </div>
+    <?php if (isAdmin()): ?>
+    <div class="header-actions">
+      <button class="btn btn-primary" data-modal="createServiceModal">＋ New Service</button>
+    </div>
+    <?php endif; ?>
+  </div>
 </div>
 
-<!-- Services Grid -->
-<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: var(--spacing-lg);">
-<?php
-if ($services) {
-    $hasAny = false;
+<?php if ($flash): ?>
+<div class="alert alert-<?= $flash['success']?'success':'danger' ?> mb-6">
+  <?= $flash['success']?'✅':'❌' ?> <?= h($flash['message']) ?>
+</div>
+<?php endif; ?>
 
-    foreach ($services as $service) {
-        $hasAny = true;
-
-        $data = $service->data();
-        $serviceId = $service->id();
-
-        $name = (string)($data['name'] ?? 'Unknown');
-        $description = (string)($data['description'] ?? '');
-
-        $isOpen = (bool)($data['isOpen'] ?? false);
-        $pending = (int)($data['pendingCount'] ?? 0);
-        $active  = (int)($data['activeCount'] ?? 0);
-        $served  = (int)($data['totalServed'] ?? 0);
-
-        // REST version usually stores ISO strings
-        $createdAt = $data['createdAt'] ?? null;
-        $createdAtText = '';
-        if (is_string($createdAt)) {
-            $t = strtotime($createdAt);
-            if ($t) $createdAtText = date('M d, Y', $t);
-        } elseif (is_object($createdAt) && method_exists($createdAt, 'get') && method_exists($createdAt->get(), 'getTimestamp')) {
-            // if ever using Timestamp wrapper
-            $createdAtText = date('M d, Y', (int)$createdAt->get()->getTimestamp());
-        }
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:18px">
+<?php foreach ($services as $svc):
+  $svcId = $svc['_id'];
+  $isOpen = $svc['isOpen'] ?? false;
+  $paused = $svc['paused'] ?? false;
+  $pending = (int)($svc['pendingCount'] ?? 0);
+  $active  = (int)($svc['activeCount'] ?? 0);
+  $served  = (int)($svc['totalServed'] ?? 0);
+  $callExp = $svc['callExpiresAt'] ?? null;
+  $calledId= $svc['calledEntryId'] ?? null;
+  $hasExpiredCall = $calledId && $callExp && strtotime($callExp) < time();
 ?>
-    <div
-        class="card"
-        data-service-id="<?= htmlspecialchars($serviceId) ?>"
-        data-name="<?= htmlspecialchars($name) ?>"
-        data-description="<?= htmlspecialchars($description) ?>"
-        data-isopen="<?= $isOpen ? '1' : '0' ?>"
-        data-pending="<?= $pending ?>"
-        data-active="<?= $active ?>"
-        data-served="<?= $served ?>"
-    >
-        <div class="card-header">
-            <div>
-                <h3 class="card-title"><?= htmlspecialchars($name) ?></h3>
-                <span class="badge badge-<?= $isOpen ? 'success' : 'danger' ?>">
-                    <?= $isOpen ? '🟢 Open' : '🔴 Closed' ?>
-                </span>
-            </div>
-
-            <button
-                class="btn btn-ghost btn-icon"
-                onclick="toggleService('<?= htmlspecialchars($serviceId) ?>', <?= $isOpen ? 'false' : 'true' ?>)"
-                title="<?= $isOpen ? 'Close service' : 'Open service' ?>"
-            >
-                <span><?= $isOpen ? '⏸️' : '▶️' ?></span>
-            </button>
-        </div>
-
-        <div class="card-body">
-            <?php if ($description !== ''): ?>
-                <p style="color: var(--text-secondary); margin-bottom: var(--spacing-lg);">
-                    <?= htmlspecialchars($description) ?>
-                </p>
-            <?php endif; ?>
-
-            <!-- Stats -->
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--spacing-md); margin-bottom: var(--spacing-lg);">
-                <div style="text-align: center; padding: var(--spacing-md); background: rgba(245, 158, 11, 0.1); border-radius: var(--radius-md);">
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning-color);"><?= $pending ?></div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Pending</div>
-                </div>
-                <div style="text-align: center; padding: var(--spacing-md); background: rgba(59, 130, 246, 0.1); border-radius: var(--radius-md);">
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--info-color);"><?= $active ?></div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Active</div>
-                </div>
-                <div style="text-align: center; padding: var(--spacing-md); background: rgba(16, 185, 129, 0.1); border-radius: var(--radius-md);">
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--success-color);"><?= $served ?></div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Served</div>
-                </div>
-            </div>
-
-            <!-- Actions -->
-            <div style="display: flex; gap: var(--spacing-sm); flex-wrap: wrap;">
-                <button class="btn btn-primary btn-sm" onclick="window.location.href='queue.php#service-<?= htmlspecialchars($serviceId) ?>'">
-                    <span>📋</span>
-                    <span>View Queue</span>
-                </button>
-
-                <?php if (hasRole(ROLE_ADMIN)): ?>
-                    <button class="btn btn-secondary btn-sm" type="button" onclick="editService('<?= htmlspecialchars($serviceId) ?>')">
-                        <span>✏️</span>
-                        <span>Edit</span>
-                    </button>
-
-                    <button class="btn btn-ghost btn-sm" type="button" onclick="resetCounts('<?= htmlspecialchars($serviceId) ?>', '<?= htmlspecialchars($name) ?>')">
-                        <span>↻</span>
-                        <span>Reset</span>
-                    </button>
-
-                    <button class="btn btn-danger btn-sm" type="button" onclick="deleteService('<?= htmlspecialchars($serviceId) ?>', '<?= htmlspecialchars($name) ?>')">
-                        <span>🗑️</span>
-                    </button>
-                <?php endif; ?>
-            </div>
-
-            <!-- Created info -->
-            <?php if ($createdAtText !== ''): ?>
-                <div style="margin-top: var(--spacing-lg); padding-top: var(--spacing-lg); border-top: 1px solid var(--glass-border); font-size: 0.75rem; color: var(--text-muted);">
-                    Created: <?= htmlspecialchars($createdAtText) ?>
-                </div>
-            <?php endif; ?>
-        </div>
+<div class="card" style="<?= $hasExpiredCall?'border-color:rgba(248,113,113,.4)':'' ?>">
+  <div class="card-header">
+    <div>
+      <div class="card-title"><?= h($svc['name'] ?? 'Service') ?></div>
+      <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
+        <?php if ($paused): ?>
+          <span class="badge badge-pending">⏸ Paused</span>
+        <?php elseif ($isOpen): ?>
+          <span class="badge badge-open"><span class="pulse-dot green"></span> Open</span>
+        <?php else: ?>
+          <span class="badge badge-closed">● Closed</span>
+        <?php endif; ?>
+        <?php if ($hasExpiredCall): ?><span class="badge badge-expired">⏱ Call Expired</span><?php endif; ?>
+      </div>
     </div>
-<?php
-    }
-
-    if (!$hasAny) {
-        echo '<div class="card" style="grid-column: 1 / -1; text-align: center; padding: 4rem;">
-                <div style="font-size: 4rem; margin-bottom: 1rem;">🏢</div>
-                <h3>No services yet</h3>
-                <p style="color: var(--text-muted); margin: 1rem 0;">Add your first service to get started</p>';
-        if (hasRole(ROLE_ADMIN)) {
-            echo '<button class="btn btn-primary" data-modal="addServiceModal">Add Service</button>';
-        }
-        echo '</div>';
-    }
-} else {
-    echo '<div class="card" style="grid-column: 1 / -1; text-align: center; padding: 4rem;">
-            <div style="font-size: 4rem; margin-bottom: 1rem;">🏢</div>
-            <h3>Could not load services</h3>
-            <p style="color: var(--text-muted); margin: 1rem 0;">Check server logs.</p>
-          </div>';
-}
-?>
-</div>
-
-<?php if (hasRole(ROLE_ADMIN)): ?>
-<!-- Add Service Modal -->
-<div id="addServiceModal" class="modal-overlay">
-    <div class="modal">
-        <div class="modal-header">
-            <h2 class="modal-title">➕ Add New Service</h2>
-            <button class="modal-close" data-modal-close>×</button>
-        </div>
-
-        <form data-ajax action="/queuelens/api/services.php" method="POST">
-            <input type="hidden" name="api_action" value="create">
-            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Service Name *</label>
-                    <input type="text" name="name" class="form-input" required placeholder="e.g. ICT Printing Services">
-                </div>
-
-                <div class="form-group">
-  <label class="form-label">Service ID *</label>
-  <input
-    type="text"
-    name="id"
-    class="form-input"
-    required
-    placeholder="e.g. svc_ict_printing"
-    pattern="[a-z0-9_]{3,50}"
-    title="Use 3–50 chars: lowercase letters, numbers, underscore only"
-  >
-  <small style="color: var(--text-muted); display:block; margin-top:6px;">
-    Allowed: a-z, 0-9, underscore (_). No spaces.
-  </small>
-</div>
-
-
-                <div class="form-group">
-                    <label class="form-label">Description</label>
-                    <textarea name="description" class="form-textarea" rows="3" placeholder="Brief description of this service"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" name="isOpen" checked>
-                        <span>Service is open</span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
-                <button type="submit" class="btn btn-primary">
-                    <span>➕</span>
-                    <span>Add Service</span>
-                </button>
-            </div>
-        </form>
+    <?php if (isAdmin()): ?>
+    <div class="flex gap-2">
+      <button onclick="document.getElementById('editModal_<?= h($svcId) ?>').classList.add('open')" class="btn btn-ghost btn-sm btn-icon" title="Settings">⚙</button>
     </div>
+    <?php endif; ?>
+  </div>
+
+  <?php if (!empty($svc['description'])): ?>
+  <div style="padding:10px 20px;font-size:.8rem;color:var(--c-text2);border-bottom:1px solid var(--c-border)"><?= h($svc['description']) ?></div>
+  <?php endif; ?>
+
+  <div class="qsc-counters">
+    <div class="qsc-counter"><div class="qsc-counter-val pending"><?= $pending ?></div><div class="qsc-counter-label">Pending</div></div>
+    <div class="qsc-counter"><div class="qsc-counter-val called"><?= $calledId ? 1 : 0 ?></div><div class="qsc-counter-label">Called</div></div>
+    <div class="qsc-counter"><div class="qsc-counter-val active"><?= $active ?></div><div class="qsc-counter-label">Active</div></div>
+    <div class="qsc-counter"><div class="qsc-counter-val" style="color:var(--c-text3)"><?= number_format($served) ?></div><div class="qsc-counter-label">Total Served</div></div>
+  </div>
+
+  <?php if (!empty($svc['locationName'])): ?>
+  <div style="padding:8px 16px;font-size:.72rem;color:var(--c-text3);border-bottom:1px solid var(--c-border)">📍 <?= h($svc['locationName']) ?></div>
+  <?php endif; ?>
+
+  <div style="padding:14px 16px;display:flex;gap:6px;flex-wrap:wrap">
+    <a href="<?= BASE_PATH ?>/pages/queue.php?service=<?= h($svcId) ?>" class="btn btn-outline btn-sm">📋 Manage Queue</a>
+    <form method="POST" style="display:inline">
+      <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+      <input type="hidden" name="action" value="toggle_open">
+      <input type="hidden" name="serviceId" value="<?= h($svcId) ?>">
+      <input type="hidden" name="new_state" value="<?= $isOpen?'0':'1' ?>">
+      <button type="submit" class="btn btn-<?= $isOpen?'danger':'success' ?> btn-sm">
+        <?= $isOpen ? '⏹ Close' : '▶ Open' ?>
+      </button>
+    </form>
+    <form method="POST" style="display:inline">
+      <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+      <input type="hidden" name="action" value="toggle_pause">
+      <input type="hidden" name="serviceId" value="<?= h($svcId) ?>">
+      <input type="hidden" name="paused" value="<?= $paused?'0':'1' ?>">
+      <button type="submit" class="btn btn-ghost btn-sm"><?= $paused?'▶ Unpause':'⏸ Pause' ?></button>
+    </form>
+  </div>
 </div>
 
-<!-- Edit Service Modal -->
-<div class="modal-overlay" id="modalEditService">
+<?php if (isAdmin()): ?>
+<!-- Edit Modal for this service -->
+<div class="modal-overlay" id="editModal_<?= h($svcId) ?>">
   <div class="modal">
     <div class="modal-header">
-      <h2>Edit Service</h2>
-      <button type="button" class="modal-close" data-modal-close>&times;</button>
+      <span class="modal-title">⚙ Edit: <?= h($svc['name'] ?? 'Service') ?></span>
+      <button class="modal-close" data-close-modal>✕</button>
     </div>
-
-    <form data-ajax action="/queuelens/api/services.php" method="POST">
-      <input type="hidden" name="api_action" value="update">
-      <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-      <input type="hidden" name="id" id="edit_service_id">
-
-      <div class="modal-body">
-
-        <!-- Editable -->
-        <div class="form-group">
-          <label class="form-label">Service Name *</label>
-          <input type="text"
-                 name="name"
-                 id="edit_service_name"
-                 class="form-input"
-                 required>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Description</label>
-          <textarea name="description"
-                    id="edit_service_description"
-                    class="form-textarea"
-                    rows="3"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox"
-                   name="isOpen"
-                   id="edit_service_isOpen">
-            <span>Service is open</span>
-          </label>
-        </div>
-
-        <!-- Read-only Stats -->
-        <div style="margin-top:20px;">
-          <label class="form-label">Current Stats</label>
-
-          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; margin-top:8px;">
-            
-            <div class="form-group">
-              <label class="form-label">Pending</label>
-              <input type="number"
-                     id="edit_service_pending"
-                     class="form-input"
-                     readonly>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Active</label>
-              <input type="number"
-                     id="edit_service_active"
-                     class="form-input"
-                     readonly>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Total Served</label>
-              <input type="number"
-                     id="edit_service_served"
-                     class="form-input"
-                     readonly>
-            </div>
-
+    <div class="modal-body">
+      <div class="tabs" data-tabs="edit_<?= h($svcId) ?>">
+        <button class="tab-btn active" data-tab="overview_<?= h($svcId) ?>">Overview</button>
+        <button class="tab-btn" data-tab="settings_<?= h($svcId) ?>">Settings</button>
+        <button class="tab-btn" data-tab="danger_<?= h($svcId) ?>">Danger</button>
+      </div>
+      <div data-tabs="edit_<?= h($svcId) ?>">
+        <div class="tab-panel active" data-panel="overview_<?= h($svcId) ?>">
+          <div class="grid-2">
+            <div><div class="stat-label">Pending</div><div class="stat-value amber"><?= $pending ?></div></div>
+            <div><div class="stat-label">Active</div><div class="stat-value green"><?= $active ?></div></div>
+            <div><div class="stat-label">Total Served</div><div class="stat-value purple"><?= $served ?></div></div>
+            <div><div class="stat-label">Call Window</div><div class="stat-value blue"><?= (int)($svc['callWindowSeconds']??120) ?>s</div></div>
+          </div>
+          <div class="divider"></div>
+          <div style="font-size:.75rem;color:var(--c-text3)">
+            <div>Head Pending: <code style="color:var(--c-text2)"><?= h($svc['headPendingEntryId'] ?? '—') ?></code></div>
+            <div style="margin-top:4px">Called: <code style="color:var(--c-text2)"><?= h($svc['calledEntryId'] ?? '—') ?></code></div>
+            <div style="margin-top:4px">Active: <code style="color:var(--c-text2)"><?= h($svc['activeEntryId'] ?? '—') ?></code></div>
           </div>
         </div>
-
+        <div class="tab-panel" data-panel="settings_<?= h($svcId) ?>">
+          <p style="color:var(--c-text2);font-size:.8rem">Queue repair tools:</p>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+            <button onclick="queueAction('repair','<?= h($svcId) ?>');this.closest('.modal-overlay').classList.remove('open')" class="btn btn-warning w-full">🔧 Repair &amp; Recalculate Queue State</button>
+            <button onclick="queueAction('expire_called','<?= h($svcId) ?>');this.closest('.modal-overlay').classList.remove('open')" class="btn btn-ghost w-full">⏱ Force Expire Called Entry</button>
+          </div>
+        </div>
+        <div class="tab-panel" data-panel="danger_<?= h($svcId) ?>">
+          <div class="alert alert-danger" style="font-size:.78rem">Deleting a service is irreversible. All entries will be orphaned.</div>
+          <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+            <input type="hidden" name="action" value="delete_service">
+            <input type="hidden" name="serviceId" value="<?= h($svcId) ?>">
+            <div class="form-group">
+              <label class="form-label">Reason for deletion</label>
+              <input class="form-control" name="reason" required placeholder="Why are you deleting this service?">
+            </div>
+            <button type="submit" class="btn btn-danger w-full" onclick="return confirm('Permanently delete <?= addslashes(h($svc['name']??'this service')) ?>?')">🗑 Delete Service Permanently</button>
+          </form>
+        </div>
       </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
+<?php endforeach; ?>
+
+<?php if (empty($services)): ?>
+<div class="empty-state" style="grid-column:1/-1">
+  <div class="empty-state-icon">🏢</div>
+  <div class="empty-state-title">No services yet</div>
+  <div class="empty-state-text">Create your first service to get started.</div>
+</div>
+<?php endif; ?>
+</div>
+
+<!-- Create Service Modal -->
+<?php if (isAdmin()): ?>
+<div class="modal-overlay" id="createServiceModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">＋ Create New Service</span>
+      <button class="modal-close" data-close-modal>✕</button>
+    </div>
+    <form method="POST">
+      <div class="modal-body">
+        <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+        <input type="hidden" name="action" value="create_service">
+        <div class="form-group">
+          <label class="form-label">Service Name *</label>
+          <input class="form-control" name="name" required placeholder="e.g. Library Print Service">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea class="form-control" name="description" rows="2" placeholder="Brief description..."></textarea>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Location</label>
+            <input class="form-control" name="locationName" placeholder="e.g. Building A, Floor 2">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Call Window (seconds)</label>
+            <input class="form-control" type="number" name="callWindowSeconds" value="120" min="30" max="600">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Max Pending Entries</label>
+          <input class="form-control" type="number" name="maxPending" value="50" min="1" max="500">
+        </div>
+      </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
-        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <button type="button" class="btn btn-ghost" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Service</button>
       </div>
     </form>
   </div>
 </div>
 
+<script>
+// Per-service tab system
+document.querySelectorAll('[data-tabs]').forEach(container => {
+  const tabsId = container.getAttribute('data-tabs');
+  if (!tabsId) return;
+  // find buttons with matching data-tab
+  const buttons = document.querySelectorAll(`[data-tab]`);
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const panel = btn.getAttribute('data-tab');
+      const parentTabs = btn.closest('[data-tabs]');
+      if (!parentTabs) return;
+      parentTabs.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const sibling = parentTabs.nextElementSibling;
+      if (sibling) {
+        sibling.querySelectorAll('.tab-panel').forEach(p => {
+          p.classList.toggle('active', p.getAttribute('data-panel') === panel);
+        });
+      }
+    });
+  });
+});
+</script>
 <?php endif; ?>
 
 <script>
-async function toggleService(serviceId, newStatus) {
-    try {
-        const formData = new FormData();
-        formData.append('api_action', 'toggle');
-        formData.append('id', serviceId);
-        formData.append('isOpen', newStatus ? 'on' : '');
-        formData.append('csrf_token', '<?php echo generateCSRFToken(); ?>');
-
-        const response = await fetch('/queuelens/api/services.php', {
-            method: 'POST',
-            body: formData
-        });
-
-        const raw = await response.text();
-        let data = null;
-        try { data = JSON.parse(raw); } catch (e) {}
-
-        if (!response.ok || !data) {
-            console.error('toggleService non-JSON:', raw);
-            app.showNotification('Server error (toggle). Check console.', 'danger');
-            return;
-        }
-
-        if (data.success) {
-            app.showNotification(data.message || 'Updated', 'success');
-            setTimeout(() => location.reload(), 500);
-        } else {
-            app.showNotification(data.message || 'Failed to toggle service', 'danger');
-        }
-    } catch (error) {
-        console.error('Toggle service error:', error);
-        app.showNotification('An error occurred', 'danger');
-    }
-}
-
-async function resetCounts(serviceId, serviceName) {
-    if (!confirm(`Reset all counters for "${serviceName}"? This will set pending, active, and total served to 0.`)) return;
-
-    try {
-        const formData = new FormData();
-        formData.append('api_action', 'reset_counts');
-        formData.append('id', serviceId);
-        formData.append('csrf_token', '<?php echo generateCSRFToken(); ?>');
-
-        const response = await fetch('/queuelens/api/services.php', {
-            method: 'POST',
-            body: formData
-        });
-
-        const raw = await response.text();
-        let data = null;
-        try { data = JSON.parse(raw); } catch (e) {}
-
-        if (!response.ok || !data) {
-            console.error('resetCounts non-JSON:', raw);
-            app.showNotification('Server error (reset). Check console.', 'danger');
-            return;
-        }
-
-        if (data.success) {
-            app.showNotification(data.message || 'Reset done', 'success');
-            setTimeout(() => location.reload(), 500);
-        } else {
-            app.showNotification(data.message || 'Failed to reset counts', 'danger');
-        }
-    } catch (error) {
-        console.error('Reset counts error:', error);
-        app.showNotification('An error occurred', 'danger');
-    }
-}
-
-async function deleteService(serviceId, serviceName) {
-    if (!confirm(`Delete "${serviceName}"? This action cannot be undone!`)) return;
-
-    try {
-        const formData = new FormData();
-        formData.append('api_action', 'delete');
-        formData.append('id', serviceId);
-        formData.append('csrf_token', '<?php echo generateCSRFToken(); ?>');
-
-        const response = await fetch('/queuelens/api/services.php', {
-            method: 'POST',
-            body: formData
-        });
-
-        const raw = await response.text();
-        let data = null;
-        try { data = JSON.parse(raw); } catch (e) {}
-
-        if (!response.ok || !data) {
-            console.error('deleteService non-JSON:', raw);
-            app.showNotification('Server error (delete). Check console.', 'danger');
-            return;
-        }
-
-        if (data.success) {
-            app.showNotification(data.message || 'Deleted', 'success');
-            setTimeout(() => location.reload(), 700);
-        } else {
-            app.showNotification(data.message || 'Failed to delete service', 'danger');
-        }
-    } catch (error) {
-        console.error('Delete service error:', error);
-        app.showNotification('An error occurred', 'danger');
-    }
-}
-
-function editService(serviceId) {
-    const card = document.querySelector(`.card[data-service-id="${serviceId}"]`);
-    if (!card) {
-        app.showNotification('Service not found in UI', 'danger');
-        return;
-    }
-
-    document.getElementById('edit_service_id').value = serviceId;
-    document.getElementById('edit_service_name').value = card.dataset.name || '';
-    document.getElementById('edit_service_description').value = card.dataset.description || '';
-    document.getElementById('edit_service_isOpen').checked = (card.dataset.isopen === '1');
-
-    document.getElementById('edit_service_pending').value = card.dataset.pending || 0;
-    document.getElementById('edit_service_active').value = card.dataset.active || 0;
-    document.getElementById('edit_service_served').value = card.dataset.served || 0;
-
-    app.openModal('modalEditService');
-}
+window._csrfToken = '<?= h($csrf) ?>';
+window._basePath = '<?= BASE_PATH ?>';
+window.refreshPage = () => location.reload();
 </script>
-
-<?php include '../includes/footer.php'; ?>
+<?php include __DIR__ . '/../includes/footer.php'; ?>

@@ -19,7 +19,7 @@ dependencies:
   webview_flutter_android: ^4.0.0
   webview_flutter_wkwebview: ^3.13.0
   webview_flutter_web: ^0.2.3+2
-
+ 
   qr_flutter: ^4.1.0
 
   # Networking

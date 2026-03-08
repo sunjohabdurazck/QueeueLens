@@ -1,0 +1,18 @@
+{
+    "name": "queuelens/admin-system",
+    "description": "Magnificent Admin System for QueueLens",
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "google/auth": "^1.50",
+        "guzzlehttp/guzzle": "^7.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

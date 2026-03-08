@@ -32,9 +32,9 @@ import 'src/screens/login_screen.dart';
 import 'src/screens/home_screen.dart';
 import 'firebase_options.dart';
 
-// ============================
+// ===========================
 // FIRESTORE DEBUGGER CLASS
-// ============================
+// ===========================
 class FirestoreDebugger {
   static final List<Map<String, dynamic>> _operations = [];
 

@@ -11,11 +11,31 @@
 
 ---
 
+## Live Deployments
+
+| Platform | URL |
+|---|---|
+| 🌐 Flutter Web App (student-facing) | [sunjohabdurazck.github.io/QueeueLens](https://sunjohabdurazck.github.io/QueeueLens/) |
+| 🖥️ Admin Dashboard | [queuelens.ct.ws](https://queuelens.ct.ws/) |
+| 💻 Source Code | [github.com/sunjohabdurazck/QueeueLens](https://github.com/sunjohabdurazck/QueeueLens) |
+
+---
+
 ## Overview
 
-**QueeueLens** is a full-stack campus queue management platform designed for IUT students and staff. It combines a cross-platform Flutter mobile/web app with a PHP admin dashboard — all backed by Firebase Firestore in real time.
+**QueeueLens** is a full-stack campus queue management platform built for IUT students and staff. It combines a cross-platform Flutter mobile and web app with a PHP admin dashboard, all backed by Firebase Firestore in real time.
 
-Students join queues by scanning QR codes, track their position live, and receive intelligent wait time predictions. Staff manage the queue from a web dashboard with granular role-based permissions. Surveillance cameras feed into an on-device ML pipeline that counts people and detects crowd anomalies, while geofencing automatically notifies students as they approach a service point.
+Students join queues by scanning QR codes, track their position live, and receive intelligent wait-time predictions. Staff manage queues from a web dashboard with granular role-based permissions. Surveillance cameras feed into an on-device ML pipeline that counts people and detects crowd anomalies, while geofencing automatically monitors student presence and handles queue expiry.
+
+---
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [SETUP.md](SETUP.md) | Full installation guide for the Flutter app and PHP admin dashboard |
+| [FEATURES.md](FEATURES.md) | Complete inventory of every implemented feature |
+| [CHANGELOG.md](CHANGELOG.md) | Full version history with per-sprint release notes |
 
 ---
 
@@ -29,7 +49,7 @@ QueeueLens/
 │   ├── di/                     # Dependency injection (GetIt)
 │   ├── features/
 │   │   ├── ai/                 # Wait prediction, anomaly detection, recommendations
-│   │   ├── queue/              # Queue state machine, intelligence listeners
+│   │   ├── queue/              # Queue state machine, intelligence listener
 │   │   ├── services/           # QR scanning, queue joining, live position tracking
 │   │   └── surveillance/       # Camera feeds, TFLite person detection (Android + Web)
 │   ├── map/                    # Campus map, directions, location services
@@ -41,7 +61,7 @@ QueeueLens/
     └── services/               # QueueService, UserService, AuditService
 ```
 
-The Flutter app follows **clean architecture** per feature (data → domain → presentation), using Riverpod for state management and GetIt for dependency injection. The admin panel is a PHP MVC application authenticating via Firebase REST API with server-side session fingerprinting.
+The Flutter app follows **clean architecture** per feature (data → domain → presentation), using Riverpod for reactive state and GetIt for dependency injection. The admin panel is a PHP MVC application authenticating via the Firebase REST API with server-side session fingerprinting.
 
 ---
 
@@ -50,70 +70,74 @@ The Flutter app follows **clean architecture** per feature (data → domain → 
 ### Student App (Flutter — Android, iOS, Web)
 
 **Queue Management**
-- Browse available campus service points
-- Join queues by scanning a QR code
-- Real-time queue position with live countdown
-- Push notifications and in-app inbox for call alerts
+- Browse campus service points with live queue counters
+- Join queues by scanning a service QR code (anti-replay token validation)
+- Real-time queue position with live wait-time range (min / max)
+- Full entry lifecycle: `pending → called → active → served / left / expired`
+- Push notifications and in-app inbox for all queue events
 - Leave or re-join queues at any time
 
 **AI-Powered Wait Intelligence**
-- On-device wait time prediction based on historical serve-time logs
-- Best service recommendation (shortest predicted wait nearby)
-- Anomaly detection for unusual queue spikes
-- Time-bucketed scoring that accounts for time-of-day patterns
+- On-device wait-time prediction based on historical serve-time logs
+- Time-of-day bucketing for peak vs off-peak accuracy
+- Best service recommendation: shortest predicted wait + walking distance
+- Proactive turn-coming-soon and wait-increase alerts
+- Anomaly detection for unusual queue spikes and suspicious activity
+- Virtual campus painter with live queue depth overlays
 
 **Campus Navigation**
-- Interactive campus map (OpenStreetMap via `flutter_map`)
-- Turn-by-turn walking directions to service points
-- Geofence-triggered notifications as you approach a service location
+- Interactive map (OpenStreetMap via `flutter_map`)
+- Turn-by-turn walking directions to any service point
+- Geofence-triggered presence monitoring with inactivity auto-expire
 - Compass-assisted 3D virtual campus view
 
 **Surveillance Viewer**
-- Live MJPEG camera stream viewer
+- Live MJPEG / RTSP / HTTP camera stream viewer
 - Real-time person detection overlaid on feed (bounding boxes + count badge)
-- TFLite SSD MobileNet v2 model — runs natively on Android and via TensorFlow.js on web
+- TFLite SSD MobileNet v2 on Android; TensorFlow.js on Web
 
 **Authentication**
-- Firebase Auth (email + password)
-- QR-code-assisted registration flow
-- Email verification gate
-- Password reset
+- Firebase Auth (email + password) with email verification gate
+- QR-code-assisted registration — scan student ID to auto-fill profile
+- Password reset and in-profile password change
 
 ---
 
-### Admin Dashboard (PHP — Web)
+### Admin Dashboard (PHP v6 — Web)
 
 **Live Queue Management**
-- Real-time queue view per service
-- Call next, recall, check-in, mark served / left / no-show
-- Force-expire called entries (admin only, with reason)
-- Service open/close toggle
+- Real-time multi-column queue board: Pending · Called · Active · Served · Expired
+- Call next, recall, check-in, mark served / left / no-show, force-expire
+- Queue Repair: `syncServiceState` reconciler fixes counter drift without data loss
+- Live call-expiry countdown per called entry
 
 **Services & Staff**
-- Create, update, delete service points
+- Create, update, delete, open, close, and pause service points
+- Configurable per-service settings: call window, max pending, accepting flag
 - Assign staff to specific services
-- Per-service queue reset
 
 **User & Role Management**
-- Roles: `student`, `staff`, `admin`
-- Granular permission flags: `canManageServices`, `canManageUsers`, `canManageCameras`, `canRepairQueue`, `canPurgeEntry`, `canExportAudit`, `canOperateAllServices`
-- Active/inactive toggle, multi-service assignment
+- Roles: `student` · `staff` · `admin`
+- Granular permissions: `canManageServices`, `canManageUsers`, `canManageCameras`, `canRepairQueue`, `canPurgeEntry`, `canExportAudit`, `canOperateAllServices`
+- Active / inactive toggle and multi-service assignment
 
 **Camera Management**
-- Register and manage IP cameras
-- View live feeds from dashboard
+- Register and manage IP cameras (MJPEG · RTSP · HTTP)
+- View live feeds from the dashboard
+- Heartbeat-based online/offline health indicators
 - 3D campus map overlay with camera positions
 
-**Analytics & Audit**
-- Service throughput charts
-- Serve time trends and queue depth history
-- Full audit log (staff actions, overrides, outcomes)
+**Analytics & Alerts**
+- Service throughput charts, serve time trends, queue depth history
+- Alerts centre: expired calls, no staff, closed-with-pending, large queue, camera offline
+- Quick-fix actions inline with each alert type
+- Full audit log with CSV/JSON export
 
 **Security (v6)**
-- Session fingerprinting (IP + User-Agent hash validation)
-- Env-var-only secrets — no keys inside the web root
+- Session fingerprinting (IP + User-Agent hash validation on every request)
+- Env-var-only secrets — no credentials inside the web root
 - `httponly`, `SameSite: Strict`, HTTPS-aware session cookies
-- Permission whitelist — arbitrary client-sent permission keys are rejected
+- Permission whitelist — arbitrary client-sent permission keys are rejected server-side
 
 ---
 
@@ -139,136 +163,27 @@ The Flutter app follows **clean architecture** per feature (data → domain → 
 
 ---
 
-## Getting Started
+## Quick Start
 
-### Prerequisites
+See **[SETUP.md](SETUP.md)** for the full installation guide. In brief:
 
-- Flutter SDK `>=3.x` with Dart `>=3.11`
-- A Firebase project with **Firestore** and **Authentication** enabled
-- PHP `8.1+` and Composer (for the admin panel)
-- Apache or Nginx
-
----
-
-### 1. Clone the repository
-
+**Flutter app:**
 ```bash
-git clone https://github.com/your-org/QueeueLens.git
+git clone https://github.com/sunjohabdurazck/QueeueLens.git
 cd QueeueLens
-```
-
----
-
-### 2. Flutter App Setup
-
-**Install dependencies:**
-
-```bash
 flutter pub get
-```
-
-**Configure Firebase:**
-
-1. Go to Firebase Console → Project Settings → Add App (Android / iOS / Web)
-2. Download `google-services.json` (Android) and/or `GoogleService-Info.plist` (iOS)
-3. Place them in the correct platform directories
-4. The web config lives in `lib/firebase_options.dart` — update it with your project values
-
-**Add assets:**
-
-Place the TFLite model files at:
-```
-assets/models/android/ssd_mobilenet_v2.tflite
-assets/models/web/ssd_mobilenet_v2.tflite
-assets/images/          ← any app images
-```
-
-**Run:**
-
-```bash
-# Android / iOS
+# Add google-services.json and update lib/firebase_options.dart
 flutter run
-
-# Web
-flutter run -d chrome
 ```
 
----
-
-### 3. Admin Dashboard Setup
-
-**Copy files to your web root:**
-
+**Admin dashboard:**
 ```bash
-# Linux / Apache
 cp -r Admin/ /var/www/html/queuelens/
-
-# Windows / XAMPP
-# Copy Admin/ to C:\xampp\htdocs\queuelens\
-```
-
-**Install PHP dependencies:**
-
-```bash
 cd /var/www/html/queuelens
 composer install --no-dev
+# Set FIREBASE_PROJECT_ID, FIREBASE_SERVICE_ACCOUNT, FIREBASE_API_KEY env vars
+# Create first admin user in Firestore — see SETUP.md §4.5
 ```
-
-**Set environment variables** (never put keys inside the web root):
-
-```apache
-# Apache vhost
-SetEnv FIREBASE_PROJECT_ID       your-project-id
-SetEnv FIREBASE_SERVICE_ACCOUNT  /etc/queuelens/serviceAccountKey.json
-SetEnv FIREBASE_API_KEY          AIzaSy...
-SetEnv FIREBASE_AUTH_DOMAIN      your-project.firebaseapp.com
-```
-
-```nginx
-# Nginx + PHP-FPM (in fastcgi_params or site config)
-fastcgi_param FIREBASE_PROJECT_ID      your-project-id;
-fastcgi_param FIREBASE_SERVICE_ACCOUNT /etc/queuelens/serviceAccountKey.json;
-fastcgi_param FIREBASE_API_KEY         AIzaSy...;
-fastcgi_param FIREBASE_AUTH_DOMAIN     your-project.firebaseapp.com;
-```
-
-**Configure Firebase client (public values only):**
-
-```bash
-cp Admin/config/firebase_client.json.example Admin/config/firebase_client.json
-# Edit firebase_client.json with your web app config values
-```
-
-**Create the first admin user in Firestore:**
-
-In Firebase Console → Firestore → `users` collection, create a document where the **Document ID is your Firebase Auth UID**:
-
-```json
-{
-  "role": "admin",
-  "name": "Your Name",
-  "email": "your@email.com",
-  "isActive": true
-}
-```
-
-**Visit the dashboard:**
-
-```
-http://localhost/queuelens/
-```
-
----
-
-### Production Security Checklist
-
-- [ ] `serviceAccountKey.json` is stored **outside** the web root
-- [ ] All secrets are set via environment variables, not hardcoded
-- [ ] `config/firebase_client.json` contains public values only
-- [ ] `.htaccess` is active (blocks direct access to `config/` and `services/`)
-- [ ] `display_errors = Off` in `php.ini`
-- [ ] HTTPS is enabled and enforced
-- [ ] Only staff/admin Firebase accounts exist in the `users` collection with correct role fields
 
 ---
 
@@ -309,74 +224,14 @@ serve_time_logs/{logId}
 ```
 pending → called → active → served
                  ↓
-              left (called_no_show, active_abandoned, admin_removed, ...)
+              left (called_no_show | active_abandoned | admin_removed | ...)
 ```
 
-- **callHead** — moves the front of the pending queue to `called`, starts the expiry window
+- **callHead** — moves the front pending entry to `called`; starts the call expiry window
 - **checkInCalled** — student checks in during the call window → `active`
-- **markServed** — staff marks active entry as `served`
-- **expireCalled** — call window expired, entry becomes `left: called_no_show`
+- **markServed** — staff marks the active entry as `served`
+- **expireCalled** — call window elapsed; entry becomes `left: called_no_show`
 - **syncServiceState** — authoritative reconciler called after every mutation; re-derives all counters from actual entry documents
-
----
-
-## Project Structure (Flutter)
-
-```
-lib/
-├── app/
-│   ├── app.dart                # MaterialApp + ProviderScope root
-│   ├── routes.dart             # go_router route definitions
-│   └── theme.dart              # Light/dark theme
-├── core/
-│   ├── constants/              # App strings, Firestore paths
-│   ├── errors/                 # App exceptions, failure types
-│   ├── geofencing/             # Background geofence service
-│   ├── notifications/          # FCM, local notifications, inbox
-│   └── widgets/                # Scaffold, error/loading/empty views
-├── features/
-│   ├── ai/
-│   │   ├── core/               # Scoring algorithms, geo helpers, time buckets
-│   │   ├── data/               # Local datasource, serve-time log models
-│   │   ├── domain/             # WaitPrediction, Recommendation, Anomaly entities
-│   │   └── presentation/       # AnomaliesPage, VirtualCampusViewPage, AI providers
-│   ├── queue/
-│   │   ├── application/        # QueueIntelligenceProvider, listener
-│   │   └── domain/             # ExpireInactiveEntries use case
-│   ├── services/
-│   │   ├── data/               # Queue + service repositories, QR payload model
-│   │   ├── domain/             # QueueEntry, ServicePoint entities + use cases
-│   │   └── presentation/       # ServicesListPage, ServiceDetailsPage, MyQueuePage,
-│   │                           # QrScannerPage, JoinQueueResultPage
-│   └── surveillance/
-│       ├── data/               # Camera model, repository
-│       ├── domain/             # SurveillanceCamera, PersonDetection entities
-│       ├── infrastructure/
-│       │   ├── android/        # TFLite image preprocessing + postprocessing
-│       │   └── web/            # TensorFlow.js bridge, web camera impl
-│       └── presentation/       # SurveillanceScreen, CameraViewPage, detection overlay
-├── map/
-│   ├── map_screen.dart
-│   ├── map_controller.dart
-│   └── services/               # LocationService, DirectionsService, MapDataService
-└── src/
-    ├── screens/                # Login, Signup, Home, StudentProfile, EmailVerification
-    ├── data/                   # Firebase auth + Firestore datasources
-    └── domain/                 # Auth use cases (SignIn, SignUp, SignOut, ...)
-```
-
----
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for the full version history. The current release is **Admin v6**, which introduced:
-
-- Fatal login redeclaration bug fix (PHP `Cannot redeclare`)
-- Env-var-only secrets workflow
-- Full queue state machine with `syncServiceState` authoritative reconciler
-- Role-scoped service actions (`toggle` vs `create/update/delete`)
-- Permission whitelist with server-side input filtering
-- Session fingerprinting for hijack detection
 
 ---
 
@@ -387,10 +242,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history. The current relea
 3. Commit your changes: `git commit -m "feat: describe your change"`
 4. Push and open a pull request
 
-Please follow the existing clean-architecture patterns per feature module and keep business logic out of widgets.
+Follow the existing clean-architecture patterns per feature module. Keep business logic out of widgets and presentation layer out of repositories.
 
 ---
 
 ## License
 
 This project is private and proprietary. All rights reserved.
+
+---
+
+*[SETUP.md](SETUP.md) · [FEATURES.md](FEATURES.md) · [CHANGELOG.md](CHANGELOG.md)*
